@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 
+from file_transfer2 import FileClient
 from utils import *
 
 def is_prompt_line(line):
@@ -30,6 +31,7 @@ class SshWrapper(object):
         self.omit_cmd_line = False
         self.print_stdout = False
         self.stdout_lines = []
+        self.stdout_line_cond = threading.Condition(self.lock)
 
     def open(self):
         self.popen_obj = subprocess.Popen(['ssh', '-tt', self.host_name],
@@ -84,6 +86,8 @@ class SshWrapper(object):
     def _add_stdout_lines(self, lines):
         with self.lock:
             self.stdout_lines.extend(lines)
+            if self.stdout_lines:
+                self.stdout_line_cond.notify()
     
     def _get_and_clear_stdout_lines(self):
         with self.lock:
@@ -164,8 +168,8 @@ class SshWrapper(object):
             if self._get_print_stdout():
                 for i, line in enumerate(new_stdout_lines):
                     sys.stdout.write(line + '\n')
-            if prompt_line:
-                sys.stdout.write(prompt_line)
+                if prompt_line:
+                    sys.stdout.write(prompt_line)
             sys.stdout.flush()
             if has_end_flag:
                 self.logger.log('has_end_flag')
@@ -199,10 +203,39 @@ class SshWrapper(object):
         self.logger.log('after wait_end_flag')
         return self._get_and_clear_stdout_lines()
 
+    def start_cmd(self, cmd, print_stdout=True):
+        self._set_end_flag(False)
+        self._get_and_clear_stdout_lines()
+        self._set_omit_cmd_line(True)
+        self._set_print_stdout(print_stdout)
+        self.popen_obj.stdin.write('%s\n' % (cmd))
+    
+    def write_line(self, data):
+        self.popen_obj.stdin.write(data + '\n')
+
+    def read_line(self):
+        self.stdout_line_cond.acquire()
+        while not self.stdout_lines:
+            self.stdout_line_cond.wait()
+        line = self.stdout_lines[0]
+        self.stdout_lines = self.stdout_lines[1:]
+        return line.strip()
+
+
 builtin_cmds = ['recv', 'send']
 def run_builtin_cmd(ssh, args):
     if args[0] == 'send':
-        
+        if len(args) != 3:
+            sys.stderr.write('send [local_file_or_dir] [remote_file_or_dir]\n')
+            return
+        ssh.run_cmd('rm -rf ~/.ssh_wrapper', print_stdout=False)
+        ssh.run_cmd('mkdir ~/.ssh_wrapper', print_stdout=False)
+        ssh.run_cmd('git clone https://github.com/yabincui/ssh_wrapper.git ~/.ssh_wrapper',
+                    print_stdout=False)
+        ssh.start_cmd('python ~/.ssh_wrapper/file_transfer2.py', print_stdout=False)
+        file_client = FileClient(write_line_function=ssh.write_line,
+                                 read_line_function=ssh.read_line)
+        file_client.send(args[1], args[2])
     
 
 def run(ssh):
