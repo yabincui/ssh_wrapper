@@ -3,8 +3,11 @@ import os
 import sys
 import threading
 
+def expand_path(path):
+    return os.path.expandvars(os.path.expanduser(path))
+
 def load_config(config_path, config):
-    config_path = os.path.expanduser(config_path)
+    config_path = expand_path(config_path)
     if os.path.isfile(config_path):
         with open(config_path) as fh:
             for line in fh.readlines():

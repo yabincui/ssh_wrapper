@@ -2,7 +2,9 @@
 
 from __future__ import print_function
 import argparse
+import subprocess
 
+from file_transfer import FileClient
 from ssh_connection import SshConnectionTerminal, SshConnectionNonTerminal
 from utils import *
 
@@ -15,10 +17,10 @@ class ShellClient(object):
                              'rcp', 'send', 'recv']
         self.terminal_ssh = SshConnectionTerminal(host_name, logger)
         self.file_transfer_ssh = SshConnectionNonTerminal(host_name, logger)
+        self.file_client = None
         self.init()
     
     def init(self):
-        self.terminal_ssh.open()
         self.file_transfer_ssh.open()
         self.file_transfer_ssh.write_line(
             'rm -rf .ssh_wrapper && mkdir .ssh_wrapper && ' +
@@ -28,17 +30,17 @@ class ShellClient(object):
             line = self.file_transfer_ssh.read_line()
             if line == 'file_server_ready':
                 break
+        self.terminal_ssh.open()
+        self.file_client = FileClient(self.file_transfer_ssh.write_line,
+                                      self.file_transfer_ssh.read_line)
 
     def run(self):
         while True:
-            logger.log('wait stdin line')
             cmd = sys.stdin.readline()
-            logger.log('after wait stdin line "%s"' % cmd)
             if not cmd:
                 break
             cmd = cmd.strip()
             args = cmd.split()
-            logger.log('run cmd = "%s"' % cmd)
             if args and args[0] in self.builtin_cmds:
                 self.run_builtin_cmd(cmd)
             else:
@@ -48,7 +50,34 @@ class ShellClient(object):
         self.terminal_ssh.write_line(cmd)
 
     def run_builtin_cmd(self, cmd):
-        pass
+        args = cmd.split()
+        if args[0] in ['lls', 'lrm', 'lcd', 'lmkdir']:
+            self.run_local_cmd(cmd[1:])
+        elif args[0] == 'local':
+            self.run_local_cmd(' '.join(args[1:]))
+        elif args[0] in ['send', 'lcp']:
+            if len(args) != 3:
+                sys.stderr.write('wrong cmd, need `%s local remote`.\n' % args[0])
+            self.send_files(args[1], args[2])
+
+        # Add prompt
+        self.run_terminal_cmd('')
+
+    def run_local_cmd(self, cmd):
+        args = cmd.split()
+        if args[0] == 'cd':
+            if len(args) != 2:
+                sys.stderr.write('wrong cmd, need `lcd local_path`\n')
+                return
+            path = expand_path(args[1])
+            if not os.path.isdir(path):
+                sys.stderr.write('path "%s" not exist.\n' % path)
+            os.chdir(path)
+        else:
+            subprocess.call(cmd, shell=True)
+
+    def send_files(self, local, remote):
+        self.file_client.send(local, remote)
 
 
 def main():
