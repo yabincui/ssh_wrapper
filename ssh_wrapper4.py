@@ -117,6 +117,8 @@ class ShellClient(object):
     def run(self):
         self.run_init_cmd()
         while True:
+            sys.stdout.write('> ')
+            sys.stdout.flush()
             cmd = sys.stdin.readline()
             if not cmd:
                 break
@@ -131,7 +133,7 @@ class ShellClient(object):
     def run_init_cmd(self):
         init_cmd = ('rm -rf .ssh_wrapper && mkdir .ssh_wrapper && ' +
                     'git clone https://github.com/yabincui/ssh_wrapper .ssh_wrapper && ' +
-                    'python .ssh_wrapper/ssh_wrapper4.py -h')
+                    'python -u .ssh_wrapper/ssh_wrapper4.py --server')
         self.ssh.write_line(init_cmd)
         while True:
             logger.log('wait read_line')
@@ -178,7 +180,9 @@ class ShellServer(object):
             sys.stdout.write(self.CMD_END + '\n')
 
     def run_normal_cmd(self, cmd):
+        sys.stdout.write('run cmd: "%s"\n' % cmd)
         subprocess.call(cmd, shell=True)
+        sys.stdout.write('run cmd over\n')
 
     def run_builtin_cmd(self, cmd):
         args = cmd.split()
