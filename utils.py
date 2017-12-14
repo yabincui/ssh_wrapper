@@ -4,6 +4,7 @@ import sys
 import threading
 
 def load_config(config_path, config):
+    config_path = os.path.expanduser(config_path)
     if os.path.isfile(config_path):
         with open(config_path) as fh:
             for line in fh.readlines():

@@ -72,6 +72,7 @@ class SshWrapper(object):
         # poll thread
         if event & select.POLLIN:
             data = self.popen_obj.stderr.read()
+            logger.log('remote stderr "%s"' % data)
             if not data:
                 self._close()
             sys.stderr.write(data)
@@ -99,6 +100,7 @@ class SshWrapper(object):
     
     def _add_stdout_lines(self, lines):
         for line in lines:
+            logger.log('put stdout_line "%s"' % line)
             self.stdout_line_queue.put(line)
     
     def read_line(self):
@@ -111,7 +113,6 @@ class ShellClient(object):
     def __init__(self, ssh):
         self.ssh = ssh
         self.builtin_cmds = ['lls', 'lcp', 'lcd', 'lrm', 'lmkdir', 'local', 'rcp', 'send', 'recv']
-        self.end_flag = 'XXXCMD_END_FLAG_OF_SSH_WRAPPERXXX'
 
     def run(self):
         self.run_init_cmd()
@@ -119,7 +120,9 @@ class ShellClient(object):
             cmd = sys.stdin.readline()
             if not cmd:
                 break
-            args = cmd.split()
+            args = cmd.strip().split()
+            if not args:
+                continue
             if args[0] in self.builtin_cmds:
                 self.run_builtin_cmd(args)
             else:
@@ -128,14 +131,24 @@ class ShellClient(object):
     def run_init_cmd(self):
         init_cmd = ('rm -rf .ssh_wrapper && mkdir .ssh_wrapper && ' +
                     'git clone https://github.com/yabincui/ssh_wrapper .ssh_wrapper && ' +
-                    'python .ssh_wrapper/ssh_wrapper4.py --server')
-        self.run_remote_cmd(init_cmd.split())
+                    'python .ssh_wrapper/ssh_wrapper4.py -h')
+        self.ssh.write_line(init_cmd)
+        while True:
+            logger.log('wait read_line')
+            line = self.ssh.read_line()
+            logger.log('read_line return "%s"' % line)
+            if line == ShellServer.CMD_END:
+                break
+            sys.stdout.write(line + '\n')
+            sys.stdout.flush()
 
     def run_remote_cmd(self, args):
-        self.ssh.write_line(' '.join(args))
+        self.ssh.write_line(ShellServer.BUILTIN_CMD_PREFIX + ' '.join(args))
         while True:
+            logger.log('wait read_line')
             line = self.ssh.read_line()
-            if line == self.end_flag:
+            logger.log('read_line return "%s"' % line)
+            if line == ShellServer.CMD_END:
                 break
             sys.stdout.write(line + '\n')
             sys.stdout.flush()
@@ -145,21 +158,24 @@ class ShellClient(object):
 
 
 class ShellServer(object):
+    BUILTIN_CMD_PREFIX = 'builtin: '
+    CMD_END = 'XXXcmd_endXXX: '
+
     def __init__(self):
-        self.builtin_cmd_prefix = 'builtin: '
-        self.cmd_end = 'XXXcmd_endXXX: '
+        pass
 
     def run(self):
+        sys.stdout.write(self.CMD_END + '\n')
         while True:
             cmd = sys.stdin.readline()
             cmd = cmd.strip()
-            if cmd.startswith(self.builtin_cmd_prefix):
-                self.run_builtin_cmd(cmd[len(self.builtin_cmd_prefix):])
+            if cmd.startswith(self.BUILTIN_CMD_PREFIX):
+                self.run_builtin_cmd(cmd[len(self.BUILTIN_CMD_PREFIX):])
             else:
                 if cmd == 'exit':
                     break
                 self.run_normal_cmd(cmd)
-            sys.stdout.write(self.cmd_end + '\n')
+            sys.stdout.write(self.CMD_END + '\n')
 
     def run_normal_cmd(self, cmd):
         subprocess.call(cmd, shell=True)
@@ -200,6 +216,8 @@ def main():
         load_config('~/.sshwrapper.config', config)
         if args.host_name:
             config['host_name'] = args.host_name
+        if 'host_name' not in config:
+            log_exit('please set host_name in argument or ~/.sshwrapper.config.')
         ssh = SshWrapper(host_name=config['host_name'])
         ssh.open()
         shell = ShellClient(ssh)
