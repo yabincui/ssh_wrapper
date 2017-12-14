@@ -13,6 +13,10 @@ SshWrapper can read configs from ~/.sshwrapper.config or ./sshwrapper.config.
 SshWrapper uses one thread to listen to ssh stdout and stderr, and uses one thread
   to send commands and handle outputs.
 
+  Start up two ssh connections, one use -T (non terminal), one use -t -t (terminal).
+  Normal shell cmd goes through terminal, file send/recv cmd goes through
+  non-terminal.
+
 
 SshSyncer: monitor file systems change and sync between local and server
   The sync is in one direction, either from server to local, or from local to server.

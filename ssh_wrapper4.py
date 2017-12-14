@@ -107,6 +107,7 @@ class SshWrapper(object):
         return self.stdout_line_queue.get()
 
     def write_line(self, data):
+        logger.log('write_line(%s)' % data)
         self.popen_obj.stdin.write(data + '\n')
 
 class ShellClient(object):
@@ -122,19 +123,23 @@ class ShellClient(object):
             cmd = sys.stdin.readline()
             if not cmd:
                 break
-            args = cmd.strip().split()
+            cmd = cmd.strip()
+            args = cmd.split()
             if not args:
                 continue
             if args[0] in self.builtin_cmds:
-                self.run_builtin_cmd(args)
+                self.run_builtin_cmd(cmd)
             else:
-                self.run_remote_cmd(args)
+                self.run_remote_cmd(cmd)
 
     def run_init_cmd(self):
         init_cmd = ('rm -rf .ssh_wrapper && mkdir .ssh_wrapper && ' +
                     'git clone https://github.com/yabincui/ssh_wrapper .ssh_wrapper && ' +
                     'python -u .ssh_wrapper/ssh_wrapper4.py --server')
-        self.ssh.write_line(init_cmd)
+        self.run_remote_cmd(init_cmd)
+
+    def run_remote_cmd(self, cmd):
+        self.ssh.write_line(cmd)
         while True:
             logger.log('wait read_line')
             line = self.ssh.read_line()
@@ -144,18 +149,7 @@ class ShellClient(object):
             sys.stdout.write(line + '\n')
             sys.stdout.flush()
 
-    def run_remote_cmd(self, args):
-        self.ssh.write_line(ShellServer.BUILTIN_CMD_PREFIX + ' '.join(args))
-        while True:
-            logger.log('wait read_line')
-            line = self.ssh.read_line()
-            logger.log('read_line return "%s"' % line)
-            if line == ShellServer.CMD_END:
-                break
-            sys.stdout.write(line + '\n')
-            sys.stdout.flush()
-
-    def run_builtin_cmd(self, args):
+    def run_builtin_cmd(self, cmd):
         pass
 
 
@@ -164,7 +158,7 @@ class ShellServer(object):
     CMD_END = 'XXXcmd_endXXX: '
 
     def __init__(self):
-        pass
+        self.shell_proc = subprocess.call
 
     def run(self):
         sys.stdout.write(self.CMD_END + '\n')

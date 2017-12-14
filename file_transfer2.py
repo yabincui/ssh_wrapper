@@ -140,6 +140,7 @@ class FileServer(FileBase):
 
 
 def run_file_server():
+    sys.stdout.write('file_server_ready\n')
     def write_line_function(data):
         sys.stdout.write(data + '\n')
     def read_line_function():
