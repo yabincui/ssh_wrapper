@@ -34,7 +34,7 @@ class SshWrapper(object):
         self.stdout_line_cond = threading.Condition(self.lock)
 
     def open(self):
-        self.popen_obj = subprocess.Popen(['ssh', '-tt', self.host_name],
+        self.popen_obj = subprocess.Popen(['ssh', '-T', self.host_name],
                                         stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE)
@@ -68,11 +68,13 @@ class SshWrapper(object):
     def _set_omit_cmd_line(self, value):
         with self.lock:
             self.omit_cmd_line = value
+            self.logger.log('set omit_cmd_line = %s' % value)
 
     def _get_and_clear_omit_cmd_line(self):
         with self.lock:
             value = self.omit_cmd_line
             self.omit_cmd_line = False
+        self.logger.log('get and clear omit_cmd_line = %s' % value)
         return value
 
     def _set_print_stdout(self, value):
@@ -150,6 +152,7 @@ class SshWrapper(object):
                 return
             self.logger.log('remote stdout process lines "%s"' % lines)
             if self._get_and_clear_omit_cmd_line():
+                self.logger.log('omit one line')
                 lines = lines[1:]
             new_stdout_lines = []
             has_end_flag = False
@@ -164,6 +167,7 @@ class SshWrapper(object):
                 else:
                     new_stdout_lines.append(line)
             if new_stdout_lines:
+                self.logger.log('new_stdout_lines "%s"' % new_stdout_lines)
                 self._add_stdout_lines(new_stdout_lines)
             if self._get_print_stdout():
                 for i, line in enumerate(new_stdout_lines):

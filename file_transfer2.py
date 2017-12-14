@@ -52,7 +52,7 @@ class FileBase(object):
     def binary_data_to_string(self, data):
         s = []
         for c in data:
-            s.append('%02x' % c)
+            s.append('%02x' % ord(c))
         return ''.join(s)
 
     def string_to_binary_data(self, s):
