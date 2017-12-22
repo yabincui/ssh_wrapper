@@ -3,6 +3,7 @@ from __future__ import print_function
 import os
 from Queue import Queue
 import select
+import string
 import subprocess
 import sys
 import threading
@@ -121,6 +122,14 @@ class SshConnectionNonTerminal(SshConnectionBase):
     def read_line(self):
         return self.stdout_line_queue.get()
 
+def is_prompt_line(line):
+    i = len(line) - 1
+    while i >= 0 and line[i].isspace():
+        i -= 1
+    if i >= 0 and line[i] in ('#', '$'):
+        return True
+    return False
+
 class SshConnectionTerminal(SshConnectionBase):
     def __init__(self, host_name, logger):
         super(SshConnectionTerminal, self).__init__(host_name, logger, 'Terminal')
@@ -129,34 +138,43 @@ class SshConnectionTerminal(SshConnectionBase):
         self.wait_pwd_data = False
         self.last_stdout_line = ''
         self.pwd_data_queue = Queue()
+        self.prompt_data_queue = Queue()
 
     def open(self):
         self._open(['ssh', '-t', '-t', self.host_name])
 
     def receive_stdout_data(self, data):
-        if self.last_stdout_line:
-            data = self.last_stdout_line + data
         with self.lock:
             omit_line = self.omit_echo_line
             wait_pwd_data = self.wait_pwd_data
+        if self.last_stdout_line:
+            data = self.last_stdout_line + data
+            self.last_stdout_line = ''
+        lines = split_lines(data)
         if omit_line:
             lines = split_lines(data)
             if len(lines) == 1:
                 return
-            data = '\n'.join(lines[1:])
+            lines = lines[1:]
             with self.lock:
                 self.omit_echo_line = False
         if wait_pwd_data:
-            lines = split_lines(data)
             if len(lines) == 1:
-                self.last_stdout_line = data
+                self.last_stdout_line = lines[0]
                 return
             with self.lock:
                 self.wait_pwd_data = False
             self.pwd_data_queue.put(lines[0])
-            data = '\n'.join(lines[1:])
-        sys.stdout.write(data)
-        sys.stdout.flush()
+            lines = lines[1:]
+        for i, line in enumerate(lines):
+            if is_prompt_line(line):
+                self.prompt_data_queue.put(line)
+                self.logger.log('add_prompt_line(%s)' % line)
+            elif i < len(lines) - 1:
+                sys.stdout.write(line + '\n')
+                self.logger.log('stdout_write(%s)' % line)
+            else:
+                self.last_stdout_line = line
 
     def write_line(self, data):
         with self.lock:
@@ -169,4 +187,9 @@ class SshConnectionTerminal(SshConnectionBase):
         self.write_line('pwd')
         return self.pwd_data_queue.get()
 
-
+    def wait_prompt(self):
+        prompt = self.prompt_data_queue.get()
+        i = len(prompt) - 1
+        while i >= 0 and prompt[i] in string.printable:
+            i -= 1
+        return prompt[i + 1 :]

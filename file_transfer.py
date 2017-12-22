@@ -12,6 +12,10 @@ cmd formats between FileClient and FileServer:
 [client] cmd: cd
 [client] path: path
 
+[client] cmd: get_possible_paths
+[client] path: path
+[server] possible_paths: a, b, c
+
 [client] cmd: path_type
 [client] path: path
 [server] type: file or dir or not_exist
@@ -106,32 +110,57 @@ class FileClient(FileBase):
     def recv(self, remote, local):
         pass
 
+    def get_possible_paths(self, path):
+        self.write_item('cmd', 'get_possible_paths')
+        self.write_item('path', path)
+        possible_paths = self.read_item('possible_paths')
+        result = []
+        for possible_path in possible_paths.split(', '):
+            if possible_path:
+                result.append(possible_path)
+        return result
+
 
 class FileServer(FileBase):
     def run(self):
         while True:
             cmd = self.read_item('cmd')
             if cmd == 'cd':
-                path = self.read_item('path')
-                if os.path.isdir(path):
-                    os.chdir(path)
-                else:
-                    sys.stderr.write("Can't switch to %s\n" % path)
+                self.handle_cd()
+            elif cmd == 'get_possible_paths':
+                self.handle_get_possible_paths()
             elif cmd == 'path_type':
-                path = self.read_item('path')
-                path = self.expand_path(path)
-                if os.path.isfile(path):
-                    path_type = 'file'
-                elif os.path.isdir(path):
-                    path_type = 'dir'
-                else:
-                    path_type = 'not_exist'
-                self.write_item('type', path_type)
+                self.handle_path_type()
             elif cmd == 'exit':
                 break
             elif cmd == 'send_file':
                 self.handle_send_file()
-    
+            else:
+                self.error('unknown cmd: %s' % cmd)
+
+    def handle_cd(self):
+        path = self.read_item('path')
+        if os.path.isdir(path):
+            os.chdir(path)
+        else:
+            self.error("Can't switch to %s" % path)
+
+    def handle_get_possible_paths(self):
+        path = self.read_item('path')
+        possible_paths = get_possible_local_paths(path)
+        self.write_item('possible_paths', ', '.join(possible_paths))
+
+    def handle_path_type(self):
+        path = self.read_item('path')
+        path = self.expand_path(path)
+        if os.path.isfile(path):
+            path_type = 'file'
+        elif os.path.isdir(path):
+            path_type = 'dir'
+        else:
+            path_type = 'not_exist'
+        self.write_item('type', path_type)
+
     def handle_send_file(self):
         local = self.read_item('local')
         remote = self.read_item('remote')
@@ -150,6 +179,8 @@ class FileServer(FileBase):
                             local, remote, sent_size, size))
                     break
 
+    def error(self, msg):
+        sys.stderr.write(msg + '\n')
 
 
 def run_file_server():

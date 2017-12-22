@@ -2,17 +2,31 @@
 
 from __future__ import print_function
 import argparse
-import cmd
 import subprocess
 
 from file_transfer import FileClient
+#from mycmd import Cmd
+from cmd import Cmd
 from ssh_connection import SshConnectionTerminal, SshConnectionNonTerminal
 from utils import *
 
 logger = Logger('./sshwrapper.log')
 
+cmd_helps = """
+            lls   -- run `ls` in local machine.
+            lcd   -- run `cd` in local machine.
+            lrm   -- run `rm` in local machine.
+            lmkdir -- run `mkdir` in local machine.
+            local cmd args...  -- run `cmd args...` in local machine.
+            rcp   -- alias to recv cmd.
+            send local_path remote_path -- send local files to remote.
+            recv remote_path local_path -- recv remote files to local.
+            lcp   -- alias to send cmd.
+            rcp   -- alias to recv cmd.
+            run script_path -- run a script.
+            """
 
-class ShellClient(cmd.Cmd):
+class ShellClient(Cmd):
     def init(self, host_name):
         self.builtin_cmds = ['lls', 'lcp', 'lcd', 'lrm', 'lmkdir', 'local',
                              'rcp', 'send', 'recv']
@@ -29,11 +43,12 @@ class ShellClient(cmd.Cmd):
             if line == 'file_server_ready':
                 break
         self.terminal_ssh.open()
+        self.prompt = self.terminal_ssh.wait_prompt()
         self.file_client = FileClient(self.file_transfer_ssh.write_line,
                                       self.file_transfer_ssh.read_line)
 
     def run(self):
-        self.prompt = ''
+        self.doc_header = cmd_helps
         self.cmdloop()
 
     def emptyline(self):
@@ -49,6 +64,7 @@ class ShellClient(cmd.Cmd):
 
     def run_terminal_cmd(self, cmd):
         self.terminal_ssh.write_line(cmd)
+        self.prompt = self.terminal_ssh.wait_prompt()
 
     def run_builtin_cmd(self, cmd):
         args = cmd.split()
@@ -77,27 +93,48 @@ class ShellClient(cmd.Cmd):
         # Add prompt
         self.run_terminal_cmd('')
 
-    def send_files(self, local, remote):
+    def sync_remote_cwd(self):
         pwd = self.terminal_ssh.get_cwd()
+        self.prompt = self.terminal_ssh.wait_prompt()
         self.file_client.set_remote_cwd(pwd)
+
+    def send_files(self, local, remote):
+        self.sync_remote_cwd()
         self.file_client.send(local, remote)
+
+    def completedefault(self, text, line, begidx, endidx):
+        logger.log('completedefault(text="%s", line="%s"' % (text, line))
+        args = line.split()
+        if not args:
+            return []
+        if line.endswith(' '):
+            args.append('')
+        result = []
+        if args[0] in ('lls', 'lcd', 'lrm', 'local', 'run'):
+            result = get_possible_local_paths(args[-1])
+        if args[0] in ('send', 'lcp'):
+            if len(args) == 2:
+                result = get_possible_local_paths(args[-1])
+            else:
+                result = self.get_possible_remote_paths(args[-1])
+        elif args[0] in ('recv', 'rcp'):
+            if len(args) == 2:
+                result = self.get_possible_remote_paths(args[-1])
+            else:
+                result = get_possible_local_paths(args[-1])
+        logger.log('completedefault(text="%s", line="%s", result = "%s"' % (args[-1], line, result))
+        return result
+
+    def get_possible_remote_paths(self, path):
+        self.sync_remote_cwd(path)
+        return self.file_client.get_possible_paths(path)
 
 
 def main():
     parser = argparse.ArgumentParser("""SSH with some convenient commands.
         It supports below cmds in addition to remote cmds through ssh:
-            lls   -- run `ls` in local machine.
-            lcd   -- run `cd` in local machine.
-            lrm   -- run `rm` in local machine.
-            lmkdir -- run `mkdir` in local machine.
-            local cmd args...  -- run `cmd args...` in local machine.
-            rcp   -- alias to recv cmd.
-            send local_path remote_path -- send local files to remote.
-            recv remote_path local_path -- recv remote files to local.
-            lcp   -- alias to send cmd.
-            rcp   -- alias to recv cmd.
-            run script_path -- run a script.
-    """)
+            %s
+    """ % cmd_helps)
     parser.add_argument('--host-name', help="""
         Set remote machine host name. It can be configured in ~/.sshwrapper.config:
           host_name=xxx@xxx

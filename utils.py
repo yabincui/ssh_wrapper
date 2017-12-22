@@ -50,3 +50,22 @@ def to_hex_str(s):
     for c in s:
         res.append('\\x%02x' % ord(c))
     return ''.join(res)
+
+logger = Logger('util.log')
+
+def get_possible_local_paths(path):
+    if not path:
+        return os.listdir('.')
+    path = expand_path(path)
+    result = []
+    dirpath, basename = os.path.split(path)
+    if os.path.isdir(dirpath):
+        for item in os.listdir(dirpath):
+            if item.startswith(basename):
+                result.append(item)
+    logger.log('path = %s, dirpath = %s, basename = %s' % (path, dirpath, basename))
+    return result
+
+
+
+

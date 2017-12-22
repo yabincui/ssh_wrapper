@@ -18,11 +18,18 @@ SshWrapper uses one thread to listen to ssh stdout and stderr, and uses one thre
   non-terminal.
 
 1. Use cmd.Cmd.
+   show correct prompt. (done)
+   show proper complete path.
 2. Add help cmd.
 3. Add recv cmd.
 4. Support sending directories.
 5. Support recving directories.
 6. Add a test script for all file passing cases.
+
+How to support vi through ssh.
+1. Too hard to support native vi. But we can copy the file to local, and open
+it using visual studio code, gvim, or vi, and send the file back to remote
+after editing.
 
 
 SshSyncer: monitor file systems change and sync between local and server
