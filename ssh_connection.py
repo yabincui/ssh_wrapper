@@ -149,6 +149,7 @@ class SshConnectionTerminal(SshConnectionBase):
         if wait_pwd_data:
             lines = split_lines(data)
             if len(lines) == 1:
+                self.last_stdout_line = data
                 return
             with self.lock:
                 self.wait_pwd_data = False

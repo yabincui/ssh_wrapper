@@ -36,7 +36,7 @@ class Logger(object):
 
 def split_lines(s):
     lines = s.splitlines()
-    if s and (s[-1] == '\r' or s[-1] == '\n'):
+    if not lines or (s and (s[-1] == '\r' or s[-1] == '\n')):
         lines.append('')
     return lines
 

@@ -111,7 +111,13 @@ class FileServer(FileBase):
     def run(self):
         while True:
             cmd = self.read_item('cmd')
-            if cmd == 'path_type':
+            if cmd == 'cd':
+                path = self.read_item('path')
+                if os.path.isdir(path):
+                    os.chdir(path)
+                else:
+                    sys.stderr.write("Can't switch to %s\n" % path)
+            elif cmd == 'path_type':
                 path = self.read_item('path')
                 path = self.expand_path(path)
                 if os.path.isfile(path):
