@@ -17,6 +17,13 @@ SshWrapper uses one thread to listen to ssh stdout and stderr, and uses one thre
   Normal shell cmd goes through terminal, file send/recv cmd goes through
   non-terminal.
 
+1. Use cmd.Cmd.
+2. Add help cmd.
+3. Add recv cmd.
+4. Support sending directories.
+5. Support recving directories.
+6. Add a test script for all file passing cases.
+
 
 SshSyncer: monitor file systems change and sync between local and server
   The sync is in one direction, either from server to local, or from local to server.

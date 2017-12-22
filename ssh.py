@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 import argparse
+import cmd
 import subprocess
 
 from file_transfer import FileClient
@@ -11,16 +12,13 @@ from utils import *
 logger = Logger('./sshwrapper.log')
 
 
-class ShellClient(object):
-    def __init__(self, host_name):
+class ShellClient(cmd.Cmd):
+    def init(self, host_name):
         self.builtin_cmds = ['lls', 'lcp', 'lcd', 'lrm', 'lmkdir', 'local',
                              'rcp', 'send', 'recv']
         self.terminal_ssh = SshConnectionTerminal(host_name, logger)
         self.file_transfer_ssh = SshConnectionNonTerminal(host_name, logger)
         self.file_client = None
-        self.init()
-    
-    def init(self):
         self.file_transfer_ssh.open()
         self.file_transfer_ssh.write_line(
             'rm -rf .ssh_wrapper && mkdir .ssh_wrapper && ' +
@@ -35,16 +33,19 @@ class ShellClient(object):
                                       self.file_transfer_ssh.read_line)
 
     def run(self):
-        while True:
-            cmd = sys.stdin.readline()
-            if not cmd:
-                break
-            cmd = cmd.strip()
-            args = cmd.split()
-            if args and args[0] in self.builtin_cmds:
-                self.run_builtin_cmd(cmd)
-            else:
-                self.run_terminal_cmd(cmd)
+        self.prompt = ''
+        self.cmdloop()
+
+    def emptyline(self):
+        self.run_terminal_cmd('')
+
+    def default(self, line):
+        cmd = line.strip()
+        args = cmd.split()
+        if args and args[0] in self.builtin_cmds:
+            self.run_builtin_cmd(cmd)
+        else:
+            self.run_terminal_cmd(cmd)
 
     def run_terminal_cmd(self, cmd):
         self.terminal_ssh.write_line(cmd)
@@ -60,8 +61,6 @@ class ShellClient(object):
                 sys.stderr.write('wrong cmd, need `%s local remote`.\n' % args[0])
             self.send_files(args[1], args[2])
 
-        # Add prompt
-        self.run_terminal_cmd('')
 
     def run_local_cmd(self, cmd):
         args = cmd.split()
@@ -75,6 +74,8 @@ class ShellClient(object):
             os.chdir(path)
         else:
             subprocess.call(cmd, shell=True)
+        # Add prompt
+        self.run_terminal_cmd('')
 
     def send_files(self, local, remote):
         pwd = self.terminal_ssh.get_cwd()
@@ -108,7 +109,8 @@ def main():
         config['host_name'] = args.host_name
     if 'host_name' not in config:
         log_exit('please set host_name in argument or ~/.sshwrapper.config.')
-    shell = ShellClient(config['host_name'])
+    shell = ShellClient()
+    shell.init(config['host_name'])
     shell.run()
 
 if __name__ == '__main__':
