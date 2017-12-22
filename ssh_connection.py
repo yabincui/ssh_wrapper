@@ -126,13 +126,19 @@ class SshConnectionTerminal(SshConnectionBase):
         super(SshConnectionTerminal, self).__init__(host_name, logger, 'Terminal')
         self.lock = threading.Lock()
         self.omit_echo_line = False
+        self.wait_pwd_data = False
+        self.last_stdout_line = ''
+        self.pwd_data_queue = Queue()
 
     def open(self):
         self._open(['ssh', '-t', '-t', self.host_name])
 
     def receive_stdout_data(self, data):
+        if self.last_stdout_line:
+            data = self.last_stdout_line + data
         with self.lock:
             omit_line = self.omit_echo_line
+            wait_pwd_data = self.wait_pwd_data
         if omit_line:
             lines = split_lines(data)
             if len(lines) == 1:
@@ -140,6 +146,14 @@ class SshConnectionTerminal(SshConnectionBase):
             data = '\n'.join(lines[1:])
             with self.lock:
                 self.omit_echo_line = False
+        if wait_pwd_data:
+            lines = split_lines(data)
+            if len(lines) == 1:
+                return
+            with self.lock:
+                self.wait_pwd_data = False
+            self.pwd_data_queue.put(lines[0])
+            data = '\n'.join(lines[1:])
         sys.stdout.write(data)
         sys.stdout.flush()
 
@@ -147,3 +161,11 @@ class SshConnectionTerminal(SshConnectionBase):
         with self.lock:
             self.omit_echo_line = True
         super(SshConnectionTerminal, self).write_line(data)
+
+    def get_cwd(self):
+        with self.lock:
+            self.wait_pwd_data = True
+        self.write_line('pwd')
+        return self.pwd_data_queue.get()
+
+

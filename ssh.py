@@ -25,7 +25,7 @@ class ShellClient(object):
         self.file_transfer_ssh.write_line(
             'rm -rf .ssh_wrapper && mkdir .ssh_wrapper && ' +
             'git clone https://github.com/yabincui/ssh_wrapper .ssh_wrapper && ' +
-            'python -u .ssh_wrapper/file_transfer2.py')
+            'python -u .ssh_wrapper/file_transfer.py')
         while True:
             line = self.file_transfer_ssh.read_line()
             if line == 'file_server_ready':
@@ -77,6 +77,8 @@ class ShellClient(object):
             subprocess.call(cmd, shell=True)
 
     def send_files(self, local, remote):
+        pwd = self.terminal_ssh.get_cwd()
+        self.file_client.set_remote_cwd(pwd)
         self.file_client.send(local, remote)
 
 
@@ -93,6 +95,7 @@ def main():
             recv remote_path local_path -- recv remote files to local.
             lcp   -- alias to send cmd.
             rcp   -- alias to recv cmd.
+            run script_path -- run a script.
     """)
     parser.add_argument('--host-name', help="""
         Set remote machine host name. It can be configured in ~/.sshwrapper.config:

@@ -35,16 +35,7 @@ class Logger(object):
             self.fh.flush()
 
 def split_lines(s):
-    lines = []
-    begin = 0
-    while begin < len(s):
-        end = begin
-        while end < len(s) and (s[end] != '\r' and s[end] != '\n'):
-            end += 1
-        lines.append(s[begin:end])
-        while end < len(s) and (s[end] == '\r' or s[end] == '\n'):
-            end += 1
-        begin = end
+    lines = s.splitlines()
     if s and (s[-1] == '\r' or s[-1] == '\n'):
         lines.append('')
     return lines

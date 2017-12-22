@@ -9,6 +9,9 @@ file_transfer: used to send files between ssh client and server.
 
 cmd formats between FileClient and FileServer:
 
+[client] cmd: cd
+[client] path: path
+
 [client] cmd: path_type
 [client] path: path
 [server] type: file or dir or not_exist
@@ -62,6 +65,10 @@ class FileBase(object):
         return ''.join(data)
 
 class FileClient(FileBase):
+    def set_remote_cwd(self, cwd):
+        self.write_item('cmd', 'cd')
+        self.write_item('path', cwd)
+
     def send(self, local, remote):
         local = self.expand_path(local)
         if os.path.isfile(local):
