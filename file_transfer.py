@@ -1,4 +1,4 @@
-
+import collections
 import os
 from utils import *
 
@@ -50,6 +50,7 @@ cmd formats between FileClient and FileServer:
 [client] path: path
 [server] dirs: a, b, c
 [server] files: a, b, c
+[server] links: a, b, c
 
 [client] cmd: send_link
 [client] local: local_path
@@ -113,7 +114,7 @@ class FileClient(FileBase):
         elif os.path.isdir(local):
             local_type = 'dir'
         else:
-            sys.stderr.write('path %s not found\n' % local)
+            self.error('path %s not found' % local)
             return
         self.write_item('cmd', 'path_type')
         self.write_item('path', remote)
@@ -146,13 +147,19 @@ class FileClient(FileBase):
                 remote_dir = remote + local_dir[len(local):]
                 logger.log('local %s, remote %s, local_dir %s, remote_dir %s' %
                     (local, remote, local_dir, remote_dir))
-                self.mkdir(remote_dir)
+                if os.path.islink(local_dir):
+                    self.send_link(local_dir, remote_dir)
+                else:
+                    self.mkdir(remote_dir)
             for f in files:
                 local_file = os.path.join(root, f)
                 remote_file = remote + local_file[len(local):]
                 logger.log('local %s, remote %s, local_file %s, remote_file %s' %
                     (local, remote, local_file, remote_file))
-                self.send_file(local_file, remote_file)
+                if os.path.islink(local_file):
+                    self.send_link(local_file, remote_file)
+                else:
+                    self.send_file(local_file, remote_file)
 
 
     def send_file(self, local, remote):
@@ -184,7 +191,59 @@ class FileClient(FileBase):
 
     def recv(self, remote, local):
         local = expand_path(local)
-        self.recv_file(remote, local)
+        if os.path.isfile(local):
+            local_type = 'file'
+        elif os.path.isdir(local):
+            local_type = 'dir'
+        else:
+            local_type = 'not_exist'
+        self.write_item('cmd', 'path_type')
+        self.write_item('path', remote)
+        remote_type = self.read_item('type')
+        if remote_type == 'file':
+            if local_type == 'file' or local_type == 'not_exist':
+                self.recv_file(remote, local)
+            else:
+                filename = os.path.basename(remote)
+                self.recv_file(remote, os.path.join(local, filename))
+        elif remote_type == 'dir':
+            if local_type == 'file':
+                self.error("%s is a file, can't recv dir to it" % local)
+            elif local_type == 'dir':
+                basename = os.path.basename(remote[:-1] if remote.endswith('/') else remote)
+                self.recv_dir(remote, os.path.join(local, basename))
+            elif local_type == 'not_exist':
+                self.recv_dir(remote, local)
+
+    def recv_dir(self, remote, local):
+        if not local.endswith('/'):
+            local += '/'
+        if not remote.endswith('/'):
+            remote += '/'
+        self.logger.log('recv_dir(remote %s, local %s)' % (remote, local))
+        mkdir(local)
+        waiting_dirs = collections.deque()
+        waiting_dirs.append(remote)
+        while len(waiting_dirs) > 0:
+            remote_path = waiting_dirs.popleft()
+            self.write_item('cmd', 'list_dir')
+            self.write_item('path', remote_path)
+            dirs = self.read_item('dirs').split(', ')
+            files = self.read_item('files').split(', ')
+            links = self.read_item('links').split(', ')
+            for d in dirs:
+                remote_dir = os.path.join(remote_path, d)
+                local_dir = local + remote_dir[len(remote):]
+                mkdir(local_dir)
+                waiting_dirs.append(remote_dir)
+            for f in files:
+                remote_file = os.path.join(remote_path, f)
+                local_file = local + remote_file[len(remote):]
+                self.recv_file(remote_file, local_file)
+            for l in links:
+                remote_link = os.path.join(remote_path, l)
+                local_link = local + remote_link[len(remote):]
+                self.recv_link(remote_link, local_link)
 
     def recv_file(self, remote, local):
         self.write_item('cmd', 'recv_file')
@@ -264,6 +323,8 @@ class FileServer(FileBase):
                 self.handle_send_link()
             elif cmd == 'recv_link':
                 self.handle_recv_link()
+            elif cmd == 'list_dir':
+                self.handle_list_dir()
             else:
                 self.error('unknown cmd: %s' % cmd)
 
@@ -359,7 +420,25 @@ class FileServer(FileBase):
         else:
             self.error("Remote %s is not a link" % remote)
             self.write_item('link', '')
-        
+
+    def handle_list_dir(self):
+        path = self.read_item('path')
+        path = expand_path(path)
+        dirs = []
+        files = []
+        links = []
+        for item in os.path.listdir(path):
+            sub_path = os.path.join(path, item)
+            if os.path.islink(sub_path):
+                links.append(item)
+            elif os.path.isdir(sub_path):
+                dirs.append(item)
+            elif os.path.isfile(sub_path):
+                files.append(item)
+        self.write_item('dirs', ', '.join(dirs))
+        self.write_item('files', ', '.join(files))
+        self.write_item('links', ', '.join(links))
+            
 
 class FileTransferTests(object):
     def __init__(self, file_client):
@@ -376,12 +455,51 @@ class FileTransferTests(object):
         with open(path, 'wb') as f:
             f.write(self.test_data)
 
-    def check_test_file(self, path, expected_path):
+    def check_file(self, path, expected_path):
         def get_file_data(path):
             with open(path, 'rb') as f:
                 return f.read()
-        if get_file_data(path) != get_file_data(expected_path):
-            self.file_client.error('send recv file failed')
+        file_type = get_file_type(path)
+        expected_file_type = get_file_type(expected_path)
+        if get_file_data(path) != get_file_data(expected_path) or file_type != expected_path:
+            self.file_client.error('check_file(%s, %s) failed' % (path, expected_path))
+
+    def check_link(self, path, expected_path):
+        if not os.path.islink(path) or os.readlink(path) != os.readlink(expected_path):
+            self.file_client.error('check_link(%s, %s) failed' % (path, expected_path))
+
+    def check_dir(self, path, expected_path):
+        waiting_dirs = collections.deque()
+        waiting_dirs.append((path, expected_path))
+        ok = True
+        while waiting_dirs:
+            path, expected = waiting_dirs.popleft()
+            items = sorted(os.listdir(path))
+            expected_items = sorted(os.listdir(expected))
+            if items != expected_items:
+                ok = False
+                break
+            for item in items:
+                sub_path = os.path.join(path, item)
+                sub_expected = os.path.join(expected, item)
+                if os.path.islink(sub_expected):
+                    if not os.path.islink(sub_path):
+                        ok = False
+                        break
+                    self.check_link(sub_path, sub_expected)
+                elif os.path.isdir(sub_expected):
+                    if not os.path.isdir(sub_path):
+                        ok = False
+                        break
+                    waiting_dirs.append((sub_path, sub_expected))
+                elif os.path.isfile(sub_expected):
+                    if not os.path.isfile(sub_path):
+                        ok = False
+                        break
+                    self.check_file(sub_path, sub_expected)
+        if not ok:
+            self.file_client.error('check_dir(%s, %s) failed' % (path, expected_path))
+        
 
     def setup_test(self):
         remove(self.test_dir)
@@ -422,10 +540,7 @@ class FileTransferTests(object):
         self.file_client.send(test_file, remote_test_file)
         recv_file = os.path.join(self.test_dir, 'dir1', 'file_transfer_recv_file')
         self.file_client.recv(remote_test_file, recv_file)
-        self.check_test_file(recv_file, test_file)
-        file_type = get_file_type(recv_file)
-        if 'executable' not in file_type:
-            self.file_client.error('file_type is wrong: %s' % file_type)
+        self.check_file(recv_file, test_file)
         self.teardown_test()
 
     def test_send_recv_link_file(self):
@@ -435,11 +550,17 @@ class FileTransferTests(object):
         self.file_client.send_link(test_file, remote_test_file)
         recv_file = os.path.join(self.test_dir, 'dir1', 'file_transfer_recv_file')
         self.file_client.recv_link(remote_test_file, recv_file)
-        if not os.path.islink(recv_file) or os.readlink(recv_file) != os.readlink(test_file):
-            self.file_client.error('send recv link file failed')
+        self.check_link(recv_file, test_file)
         self.teardown_test()
 
-        
+    def test_send_recv_dirs(self):
+        self.setup_test()
+        send_dir = os.path.join(get_script_dir(), 'testdata')
+        self.file_client.send(send_dir, self.remote_test_dir)
+        self.file_client.recv(os.path.join(self.remote_test_dir, 'testdata'), self.test_dir)
+        recv_dir = os.path.join(self.test_dir, 'testdata')        
+        self.check_dir(recv_dir, send_dir)
+        self.teardown_test()
 
 def run_file_transfer_tests(file_client):
     test = FileTransferTests(file_client)
