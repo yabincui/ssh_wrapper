@@ -5,6 +5,7 @@ from utils import *
 
 class TestUtils(unittest.TestCase):
     def test_get_possible_paths(self):
+        remove('test_tmp')
         mkdir('test_tmp')
         mkdir('test_tmp/test_dir')
         touch('test_tmp/test_file')

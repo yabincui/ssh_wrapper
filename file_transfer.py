@@ -44,6 +44,11 @@ cmd formats between FileClient and FileServer:
 [client] cmd: rmdir
 [client] path: path
 
+[client] cmd: list_dir
+[client] path: path
+[server] dirs: a, b, c
+[server] files: a, b, c
+
 """
 
 class FileBase(object):
@@ -107,6 +112,30 @@ class FileClient(FileBase):
             else:
                 filename = os.path.basename(local)
                 self.send_file(local, os.path.join(remote, filename))
+        elif local_type == 'dir':
+            if remote_type == 'file':
+                self.error("%s is a file, can't send dir to it" % remote)
+            elif remote_type == 'dir':
+                self.send_dir(local, os.path.join(remote, local))
+            elif remote_type == 'not_exist':
+                self.send_dir(local, remote)
+
+    def send_dir(self, local, remote):
+        if not local.endswith('/'):
+            local += '/'
+        if not remote.endswith('/'):
+            remote += '/'
+        self.mkdir(remote)
+        for root, dirs, files in os.walk(local):
+            for d in dirs:
+                local_dir = os.path.join(root, d)
+                remote_dir = remote + local_dir[len(local):]
+                self.mkdir(remote_dir)
+            for f in files:
+                local_file = os.path.join(root, f)
+                remote_file = remote + local_file[len(local):]
+                self.send_file(local_file, remote_file)
+
 
     def send_file(self, local, remote):
         self.write_item('cmd', 'send_file')
@@ -176,11 +205,13 @@ class FileClient(FileBase):
         test_data = ''.join(test_data)
         # Test 1: send recv file
         test_dir = 'file_transfer_test_dir'
+        remove(test_dir)
         mkdir(test_dir)
         test_file = os.path.join(test_dir, 'file_transfer_test')
         with open(test_file, 'wb') as f:
             f.write(test_data)
         remote_test_dir = 'file_transfer_remote_test_dir'
+        self.remove(remote_test_dir)
         self.mkdir(remote_test_dir)
         remote_test_file = os.path.join(remote_test_dir, 'file_transfer_test')
         self.send(test_file, remote_test_file)
@@ -203,6 +234,7 @@ class FileClient(FileBase):
             return
 
         remove(test_dir)
+        self.remove(remote_test_dir)
         sys.stdout.write('test done!\n')
 
 class FileServer(FileBase):

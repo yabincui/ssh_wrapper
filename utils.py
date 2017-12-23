@@ -73,7 +73,6 @@ def run_cmd(cmd):
     subprocess.check_call(cmd, shell=True)
 
 def mkdir(path):
-    run_cmd('rm -rf %s' % path)
     run_cmd('mkdir -p %s' % path)
 
 def touch(path):
