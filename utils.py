@@ -2,7 +2,9 @@ import fcntl
 import os
 import subprocess
 import sys
+import termios
 import threading
+import tty
 
 def expand_path(path):
     return os.path.expandvars(os.path.expanduser(path))
@@ -45,6 +47,14 @@ def make_file_nonblocking(fh):
     fd = fh.fileno()
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+def use_raw_stdin():
+    old_stdin_setting = termios.tcgetattr(sys.stdin.fileno())
+    tty.setraw(sys.stdin.fileno())
+    return old_stdin_setting
+
+def restore_stdin(old_stdin_setting):
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_stdin_setting)
 
 def to_hex_str(s):
     res = []
