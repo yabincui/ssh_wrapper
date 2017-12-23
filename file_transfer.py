@@ -212,6 +212,9 @@ class FileClient(FileBase):
             run_cmd('chmod a+x %s' % local)
 
     def recv_link(self, remote, local):
+        dirpath = os.path.split(local)[0]
+        if dirpath:
+            run_cmd('mkdir -p %s' % dirpath)
         self.write_item('cmd', 'recv_link')
         self.write_item('remote', remote)
         self.write_item('local', local)
@@ -343,6 +346,9 @@ class FileServer(FileBase):
         local = self.read_item('local')
         remote = self.read_item('remote')
         link = self.read_item('link')
+        dirpath = os.path.split(remote)[0]
+        if dirpath:
+            mkdir(dirpath)
         run_cmd('ln -s %s %s' % (link, remote))
 
     def handle_recv_link(self):
