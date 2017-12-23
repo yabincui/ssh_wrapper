@@ -31,6 +31,14 @@ cmd formats between FileClient and FileServer:
 ...
 [client] data_end: data_size
 
+[client] cmd: recv_file
+[client] remote: remote_path
+[client] local: local_path
+// Split to 4K per line
+[server] data: data in hex format
+[server] data_end: data_size
+
+
 """
 
 class FileBase(object):
@@ -56,9 +64,6 @@ class FileBase(object):
         self.logger.log('write_item(%s: %s)' % (key, value))
         self.write_line_function(key + ': ' + value)
     
-    def expand_path(self, path):
-        return os.path.expanduser(os.path.expandvars(path))
-
     def binary_data_to_string(self, data):
         s = []
         for c in data:
@@ -71,13 +76,16 @@ class FileBase(object):
             data.append(chr(int(s[i:i+2], 16)))
         return ''.join(data)
 
+    def error(self, msg):
+        sys.stderr.write(msg + '\n')
+
 class FileClient(FileBase):
     def set_remote_cwd(self, cwd):
         self.write_item('cmd', 'cd')
         self.write_item('path', cwd)
 
     def send(self, local, remote):
-        local = self.expand_path(local)
+        local = expand_path(local)
         if os.path.isfile(local):
             local_type = 'file'
         elif os.path.isdir(local):
@@ -111,7 +119,28 @@ class FileClient(FileBase):
             self.write_item('data_end', '%d' % size)
     
     def recv(self, remote, local):
-        pass
+        local = expand_path(local)
+        self.recv_file(remote, local)
+
+    def recv_file(self, remote, local):
+        self.write_item('cmd', 'recv_file')
+        self.write_item('remote', remote)
+        self.write_item('local', local)
+        with open(local, 'wb') as f:
+            size = 0
+            while True:
+                key, value = self.read_items(('data', 'data_end'))
+                if key == 'data':
+                    data = self.string_to_binary_data(value)
+                    size += len(data)
+                    f.write(data)
+                elif key == 'data_end':
+                    sent_size = int(value)
+                    if size != sent_size:
+                        self.error('recv_file %s to %s, sent_size %d, recv_size %d' %
+                            (remote, local, sent_size, size))
+                    break
+
 
     def get_possible_paths(self, path):
         self.write_item('cmd', 'get_possible_paths')
@@ -138,6 +167,8 @@ class FileServer(FileBase):
                 break
             elif cmd == 'send_file':
                 self.handle_send_file()
+            elif cmd == 'recv_file':
+                self.handle_recv_file()
             else:
                 self.error('unknown cmd: %s' % cmd)
 
@@ -155,7 +186,7 @@ class FileServer(FileBase):
 
     def handle_path_type(self):
         path = self.read_item('path')
-        path = self.expand_path(path)
+        path = expand_path(path)
         if os.path.isfile(path):
             path_type = 'file'
         elif os.path.isdir(path):
@@ -182,8 +213,20 @@ class FileServer(FileBase):
                             local, remote, sent_size, size))
                     break
 
-    def error(self, msg):
-        sys.stderr.write(msg + '\n')
+    def handle_recv_file(self):
+        remote = self.read_item('remote')
+        local = self.read_item('local')
+        with open(remote, 'rb') as f:
+            size = 0
+            while True:
+                data = f.read(4096)
+                if not data:
+                    break
+                size += len(data)
+                s = self.binary_data_to_string(data)
+                self.write_item('data', s)
+            self.write_item('data_end', '%d' % size)
+
 
 
 def run_file_server():

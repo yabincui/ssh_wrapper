@@ -19,7 +19,7 @@ SshWrapper uses one thread to listen to ssh stdout and stderr, and uses one thre
 
 1. Use cmd.Cmd.
    show correct prompt. (done)
-   show proper complete path.
+   show proper complete path. (done)
 2. Add help cmd. (done)
 3. Add recv cmd.
 4. Support sending directories.

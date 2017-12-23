@@ -69,21 +69,29 @@ class ShellClient(Cmd):
         else:
             self.run_terminal_cmd(cmd)
 
+    def error(self, msg):
+        sys.stderr.write(msg + '\n')
+
     def run_terminal_cmd(self, cmd):
         self.terminal_ssh.write_line(cmd)
         self.prompt = self.terminal_ssh.wait_prompt()
 
     def run_builtin_cmd(self, cmd):
         args = cmd.split()
-        if args[0] in ['lls', 'lrm', 'lcd', 'lmkdir']:
+        if args[0] in ('lls', 'lrm', 'lcd', 'lmkdir'):
             self.run_local_cmd(cmd[1:])
         elif args[0] == 'local':
             self.run_local_cmd(' '.join(args[1:]))
-        elif args[0] in ['send', 'lcp']:
+        elif args[0] in ('send', 'lcp'):
             if len(args) != 3:
-                sys.stderr.write('wrong cmd, need `%s local remote`.\n' % args[0])
-            self.send_files(args[1], args[2])
-
+                self.error('wrong cmd, need `%s local remote`.' % args[0])
+            else:
+                self.send_files(args[1], args[2])
+        elif args[0] in ('recv', 'rcp'):
+            if len(args) != 3:
+                self.error('wrong cmd, need `%s remote local`.' % args[0])
+            else:
+                self.recv_files(args[1], args[2])
 
     def run_local_cmd(self, cmd):
         args = cmd.split()
@@ -108,6 +116,10 @@ class ShellClient(Cmd):
     def send_files(self, local, remote):
         self.sync_remote_cwd()
         self.file_client.send(local, remote)
+
+    def recv_files(self, remote, local):
+        self.sync_remote_cwd()
+        self.file_client.recv(remote, local)
 
     def completedefault(self, text, line, begidx, endidx):
         logger.log('completedefault(text="%s", line="%s"' % (text, line))
