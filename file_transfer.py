@@ -305,7 +305,7 @@ class FileServer(FileBase):
         if path in ('~', '/'):
             return
         path = expand_path(path)
-        rmdir(path)
+        remove(path)
 
 class FileTransferTests(object):
     def __init__(self, file_client):
@@ -332,12 +332,12 @@ class FileTransferTests(object):
     def setup_test(self):
         remove(self.test_dir)
         mkdir(self.test_dir)
-        self.file_client.remove(self.remote_test_dir)
+        self.file_client.rmdir(self.remote_test_dir)
         self.file_client.mkdir(self.remote_test_dir)
 
     def teardown_test(self):
         remove(self.test_dir)
-        self.file_client.remove(self.remote_test_dir)
+        self.file_client.rmdir(self.remote_test_dir)
 
     def test_send_recv_file(self):
         self.setup_test()
