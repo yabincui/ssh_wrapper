@@ -51,6 +51,16 @@ cmd formats between FileClient and FileServer:
 [server] dirs: a, b, c
 [server] files: a, b, c
 
+[client] cmd: send_link
+[client] local: local_path
+[client] remote: remote_path
+[client] link: link
+
+[client] cmd: recv_link
+[client] remote: remote_path
+[client] local: local_path
+[server] link: link
+
 """
 
 class FileBase(object):
@@ -161,7 +171,17 @@ class FileClient(FileBase):
                 s = self.binary_data_to_string(data)
                 self.write_item('data', s)
             self.write_item('data_end', '%d' % size)
-    
+
+    def send_link(self, local, remote):
+        if not os.path.islink(local):
+            self.error("%s isn't a link" % local)
+            return
+        link = os.readlink(local)
+        self.write_item('cmd', 'send_link')
+        self.write_item('local', local)
+        self.write_item('remote', remote)
+        self.write_item('link', link)
+
     def recv(self, remote, local):
         local = expand_path(local)
         self.recv_file(remote, local)
@@ -190,6 +210,14 @@ class FileClient(FileBase):
                     break
         if 'executable' in file_type:
             run_cmd('chmod a+x %s' % local)
+
+    def recv_link(self, remote, local):
+        self.write_item('cmd', 'recv_link')
+        self.write_item('remote', remote)
+        self.write_item('local', local)
+        link = self.read_item('link')
+        if link:
+            run_cmd('ln -s %s %s' % (link, local))
 
     def get_possible_paths(self, path):
         self.write_item('cmd', 'get_possible_paths')
@@ -229,6 +257,10 @@ class FileServer(FileBase):
                 self.handle_mkdir()
             elif cmd == 'rmdir':
                 self.handle_rmdir()
+            elif cmd == 'send_link':
+                self.handle_send_link()
+            elif cmd == 'recv_link':
+                self.handle_recv_link()
             else:
                 self.error('unknown cmd: %s' % cmd)
 
@@ -307,6 +339,22 @@ class FileServer(FileBase):
         path = expand_path(path)
         remove(path)
 
+    def handle_send_link(self):
+        local = self.read_item('local')
+        remote = self.read_item('remote')
+        link = self.read_item('link')
+        run_cmd('ln -s %s %s' % (link, remote))
+
+    def handle_recv_link(self):
+        remote = self.read_item('remote')
+        local = self.read_item('local')
+        if os.path.islink(remote):
+            self.write_item('link', os.readlink(remote))
+        else:
+            self.error("Remote %s is not a link" % remote)
+            self.write_item('link', '')
+        
+
 class FileTransferTests(object):
     def __init__(self, file_client):
         self.file_client = file_client
@@ -370,8 +418,19 @@ class FileTransferTests(object):
         self.file_client.recv(remote_test_file, recv_file)
         self.check_test_file(recv_file, test_file)
         file_type = get_file_type(recv_file)
-        if 'execute' not in file_type:
+        if 'executable' not in file_type:
             self.file_client.error('file_type is wrong: %s' % file_type)
+        self.teardown_test()
+
+    def test_send_recv_link_file(self):
+        self.setup_test()
+        test_file = os.path.join(get_script_dir(), 'testdata', 'lnk_file')
+        remote_test_file = os.path.join(self.remote_test_dir, 'dir1', 'file_transfer_test')
+        self.file_client.send_link(test_file, remote_test_file)
+        recv_file = os.path.join(self.test_dir, 'dir1', 'file_transfer_recv_file')
+        self.file_client.recv_link(remote_test_file, recv_file)
+        if not os.path.islink(recv_file) or os.readlink(recv_file) != os.readlink(test_file):
+            self.file_client.error('send recv link file failed')
         self.teardown_test()
 
         
@@ -381,6 +440,7 @@ def run_file_transfer_tests(file_client):
     test.test_send_recv_file()
     test.test_send_recv_file_with_mkdir()
     test.test_send_recv_exec_file()
+    test.test_send_recv_link_file()
     sys.stdout.write('test done!\n')
 
 
