@@ -91,3 +91,8 @@ def get_file_type(path):
 
 def get_script_dir():
     return os.path.dirname(os.path.realpath(__file__))
+
+def split_string(s, sep=', '):
+    if not s:
+        return []
+    return s.split(sep)

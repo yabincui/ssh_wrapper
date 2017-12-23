@@ -228,9 +228,10 @@ class FileClient(FileBase):
             remote_path = waiting_dirs.popleft()
             self.write_item('cmd', 'list_dir')
             self.write_item('path', remote_path)
-            dirs = self.read_item('dirs').split(', ')
-            files = self.read_item('files').split(', ')
-            links = self.read_item('links').split(', ')
+            dirs = split_string(self.read_item('dirs'))
+            files = split_string(self.read_item('files'))
+            links = split_string(self.read_item('links'))
+            self.logger.log('dirs = %s, files = %s, links = %s' % (dirs, files, links))
             for d in dirs:
                 remote_dir = os.path.join(remote_path, d)
                 local_dir = local + remote_dir[len(remote):]
@@ -284,12 +285,7 @@ class FileClient(FileBase):
     def get_possible_paths(self, path):
         self.write_item('cmd', 'get_possible_paths')
         self.write_item('path', path)
-        possible_paths = self.read_item('possible_paths')
-        result = []
-        for possible_path in possible_paths.split(', '):
-            if possible_path:
-                result.append(possible_path)
-        return result
+        return split_string(self.read_item('possible_paths'))
 
     def mkdir(self, path):
         self.write_item('cmd', 'mkdir')

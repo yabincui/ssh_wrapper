@@ -21,10 +21,10 @@ SshWrapper uses one thread to listen to ssh stdout and stderr, and uses one thre
    show correct prompt. (done)
    show proper complete path. (done)
 2. Add help cmd. (done)
-3. Add recv cmd.
-4. Support sending directories.
-5. Support recving directories.
-6. Add a test script for all file passing cases.
+3. Add recv cmd. (done)
+4. Support sending directories. (done)
+5. Support recving directories. (done)
+6. Add a test script for all file passing cases. (done)
 7. Use select.kqueue on mac.
 
 How to support vi through ssh.
@@ -32,6 +32,16 @@ How to support vi through ssh.
 it using visual studio code, gvim, or vi, and send the file back to remote
 after editing.
 
+We can study how to allow ssh control the terminal using cursor module.
+The input and output is no longer based on line.
+1. ssh_wrapper has two modes:
+  line mode when waiting commands and executing builtin commands.
+  raw mode when executing normal commands. It sends every keystroke to the command through ssh,
+  reads how the command wants to control the terminal, and show it using console module.
+
+About the protocol:
+  https://en.wikipedia.org/wiki/ANSI_escape_code
+  http://ascii-table.com/ansi-escape-sequences.php
 
 SshSyncer: monitor file systems change and sync between local and server
   The sync is in one direction, either from server to local, or from local to server.
