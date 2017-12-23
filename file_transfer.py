@@ -130,10 +130,14 @@ class FileClient(FileBase):
             for d in dirs:
                 local_dir = os.path.join(root, d)
                 remote_dir = remote + local_dir[len(local):]
+                logger.log('local %s, remote %s, local_dir %s, remote_dir %s' %
+                    (local, remote, local_dir, remote_dir))
                 self.mkdir(remote_dir)
             for f in files:
                 local_file = os.path.join(root, f)
                 remote_file = remote + local_file[len(local):]
+                logger.log('local %s, remote %s, local_file %s, remote_file %s' %
+                    (local, remote, local_file, remote_file))
                 self.send_file(local_file, remote_file)
 
 
