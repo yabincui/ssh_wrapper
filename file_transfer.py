@@ -131,6 +131,9 @@ class FileClient(FileBase):
         self.write_item('cmd', 'recv_file')
         self.write_item('remote', remote)
         self.write_item('local', local)
+        dirpath = os.path.split(local)[0]
+        if dirpath:
+            run_cmd('mkdir -p %s' % dirpath)
         with open(local, 'wb') as f:
             size = 0
             while True:
@@ -171,6 +174,7 @@ class FileClient(FileBase):
             test_data.append(chr(i / 256))
             test_data.append(chr(i % 256))
         test_data = ''.join(test_data)
+        # Test 1: send recv file
         test_dir = 'file_transfer_test_dir'
         mkdir(test_dir)
         test_file = os.path.join(test_dir, 'file_transfer_test')
@@ -180,13 +184,26 @@ class FileClient(FileBase):
         self.mkdir(remote_test_dir)
         remote_test_file = os.path.join(remote_test_dir, 'file_transfer_test')
         self.send(test_file, remote_test_file)
-        test_file2 = os.path.join(test_dir, 'file_transfer_test2')
-        self.recv(remote_test_file, test_file2)
-        with open(test_file2, 'rb') as f:
-            data = f.read()
-        if data != test_data:
-            self.error('test failed')
+        recv_file = os.path.join(test_dir, 'file_transfer_recv_file')
+        self.recv(remote_test_file, recv_file)
+        def get_file_data(path):
+            with open(path, 'rb') as f:
+                return f.read()
+        if get_file_data(recv_file) != test_data:
+            self.error('send recv file failed')
+            return
 
+        # Test 2: send recv file, need to mkdir.
+        remote_test_file = os.path.join(remote_test_dir, 'dir1', 'file_transfer_test')
+        self.send(test_file, remote_test_file)
+        recv_file = os.path.join(test_dir, 'dir1', 'file_transfer_recv_file')
+        self.recv(remote_test_file, recv_file)
+        if get_file_data(recv_file) != test_data:
+            self.error('send recv file, need to mkdir failed')
+            return
+
+        remove(test_dir)
+        sys.stdout.write('test done!\n')
 
 class FileServer(FileBase):
     def run(self):
@@ -237,6 +254,9 @@ class FileServer(FileBase):
     def handle_send_file(self):
         local = self.read_item('local')
         remote = self.read_item('remote')
+        dirpath = os.path.split(remote)[0]
+        if dirpath:
+            run_cmd('mkdir -p %s' % dirpath)
         with open(remote, 'wb') as f:
             size = 0
             while True:
