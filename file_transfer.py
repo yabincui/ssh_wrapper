@@ -125,6 +125,7 @@ class FileClient(FileBase):
             local += '/'
         if not remote.endswith('/'):
             remote += '/'
+        self.logger.log('send_dir(local %s, remote %s)' % (local, remote))
         self.mkdir(remote)
         for root, dirs, files in os.walk(local):
             for d in dirs:
@@ -324,12 +325,14 @@ class FileServer(FileBase):
 
     def handle_mkdir(self):
         path = self.read_item('path')
+        path = expand_path(path)
         mkdir(path)
 
     def handle_rmdir(self):
         path = self.read_item('path')
         if path in ('~', '/'):
             return
+        path = expand_path(path)
         rmdir(path)
 
 
