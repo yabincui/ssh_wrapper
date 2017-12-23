@@ -38,6 +38,11 @@ cmd formats between FileClient and FileServer:
 [server] data: data in hex format
 [server] data_end: data_size
 
+[client] cmd: mkdir
+[client] path: path
+
+[client] cmd: rmdir
+[client] path: path
 
 """
 
@@ -152,6 +157,36 @@ class FileClient(FileBase):
                 result.append(possible_path)
         return result
 
+    def mkdir(self, path):
+        self.write_item('cmd', 'mkdir')
+        self.write_item('path', path)
+
+    def rmdir(self, path):
+        self.write_item('cmd', 'rmdir')
+        self.write_item('path', path)
+
+    def test(self):
+        test_data = []
+        for i in range(65536):
+            test_data.append(chr(i / 256))
+            test_data.append(chr(i % 256))
+        test_data = ''.join(test_data)
+        test_dir = 'file_transfer_test_dir'
+        mkdir(test_dir)
+        test_file = os.path.join(test_dir, 'file_transfer_test')
+        with open(test_file, 'wb') as f:
+            f.write(test_data)
+        remote_test_dir = 'file_transfer_remote_test_dir'
+        self.mkdir(remote_test_dir)
+        remote_test_file = os.path.join(remote_test_dir, 'file_transfer_test')
+        self.send(test_file, remote_test_file)
+        test_file2 = os.path.join(test_dir, 'file_transfer_test2')
+        self.recv(remote_test_file, test_file2)
+        with open(test_file2, 'rb') as f:
+            data = f.read()
+        if data != test_data:
+            self.error('test failed')
+
 
 class FileServer(FileBase):
     def run(self):
@@ -169,6 +204,10 @@ class FileServer(FileBase):
                 self.handle_send_file()
             elif cmd == 'recv_file':
                 self.handle_recv_file()
+            elif cmd == 'mkdir':
+                self.handle_mkdir()
+            elif cmd == 'rmdir':
+                self.handle_rmdir()
             else:
                 self.error('unknown cmd: %s' % cmd)
 
@@ -227,6 +266,15 @@ class FileServer(FileBase):
                 self.write_item('data', s)
             self.write_item('data_end', '%d' % size)
 
+    def handle_mkdir(self):
+        path = self.read_item('path')
+        mkdir(path)
+
+    def handle_rmdir(self):
+        path = self.read_item('path')
+        if path in ('~', '/'):
+            return
+        rmdir(path)
 
 
 def run_file_server():

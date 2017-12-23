@@ -25,12 +25,13 @@ cmd_helps = """
             lcp   -- alias to send cmd.
             rcp   -- alias to recv cmd.
             run script_path -- run a script.
+            test  -- run file transfer test.
             """
 
 class ShellClient(Cmd):
     def init(self, host_name):
         self.builtin_cmds = ['lls', 'lcp', 'lcd', 'lrm', 'lmkdir', 'local',
-                             'rcp', 'send', 'recv']
+                             'rcp', 'send', 'recv', 'test']
         self.terminal_ssh = SshConnectionTerminal(host_name, logger)
         self.file_transfer_ssh = SshConnectionNonTerminal(host_name, logger)
         self.file_client = None
@@ -92,6 +93,10 @@ class ShellClient(Cmd):
                 self.error('wrong cmd, need `%s remote local`.' % args[0])
             else:
                 self.recv_files(args[1], args[2])
+        elif args[0] == 'test':
+            self.run_test()
+        else:
+            self.error('unexpected builtin cmd %s' % cmd)
 
     def run_local_cmd(self, cmd):
         args = cmd.split()
@@ -151,6 +156,9 @@ class ShellClient(Cmd):
     def get_possible_remote_paths(self, path):
         self.sync_remote_cwd()
         return self.file_client.get_possible_paths(path)
+
+    def run_test(self):
+        self.file_client.test()
 
 
 def main():

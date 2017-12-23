@@ -4,20 +4,6 @@ import unittest
 
 from utils import *
 
-def run_cmd(cmd):
-    subprocess.check_call(cmd, shell=True)
-
-def mkdir(path):
-    run_cmd('rm -rf %s' % path)
-    run_cmd('mkdir -p %s' % path)
-
-def touch(path):
-    run_cmd('rm -rf %s' % path)
-    run_cmd('touch %s' % path)
-
-def remove(path):
-    run_cmd('rm -rf %s' % path)
-
 class TestUtils(unittest.TestCase):
     def test_get_possible_paths(self):
         mkdir('test_tmp')

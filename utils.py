@@ -68,6 +68,18 @@ def get_possible_local_paths(path):
     logger.log('path = %s, dirpath = %s, basename = %s' % (path, dirpath, basename))
     return result
 
+def run_cmd(cmd):
+    subprocess.check_call(cmd, shell=True)
 
+def mkdir(path):
+    run_cmd('rm -rf %s' % path)
+    run_cmd('mkdir -p %s' % path)
+
+def touch(path):
+    run_cmd('rm -rf %s' % path)
+    run_cmd('touch %s' % path)
+
+def remove(path):
+    run_cmd('rm -rf %s' % path)
 
 
