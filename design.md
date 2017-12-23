@@ -20,11 +20,12 @@ SshWrapper uses one thread to listen to ssh stdout and stderr, and uses one thre
 1. Use cmd.Cmd.
    show correct prompt. (done)
    show proper complete path.
-2. Add help cmd.
+2. Add help cmd. (done)
 3. Add recv cmd.
 4. Support sending directories.
 5. Support recving directories.
 6. Add a test script for all file passing cases.
+7. Use select.kqueue on mac.
 
 How to support vi through ssh.
 1. Too hard to support native vi. But we can copy the file to local, and open

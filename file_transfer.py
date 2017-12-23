@@ -34,15 +34,17 @@ cmd formats between FileClient and FileServer:
 """
 
 class FileBase(object):
-    def __init__(self, write_line_function, read_line_function):
+    def __init__(self, write_line_function, read_line_function, logger):
         self.write_line_function = write_line_function
         self.read_line_function = read_line_function
+        self.logger = logger
 
     def read_item(self, expected_key):
         return self.read_items([expected_key])[1]
 
     def read_items(self, expected_keys):
         line = self.read_line_function()
+        self.logger.log('read_items(%s) = %s' % (expected_keys, line))
         if not line:
             log_exit('unexpected end')
         for expected_key in expected_keys:
@@ -51,6 +53,7 @@ class FileBase(object):
         log_exit('expected_keys are %s, bug get %s' % (expected_keys, line))
 
     def write_item(self, key, value):
+        self.logger.log('write_item(%s: %s)' % (key, value))
         self.write_line_function(key + ': ' + value)
     
     def expand_path(self, path):
@@ -191,7 +194,8 @@ def run_file_server():
         line = sys.stdin.readline()
         if line and line[-1] == '\n':
             return line[:-1]
-    server = FileServer(write_line_function, read_line_function)
+    logger = Logger('.ssh_wrapper.log')
+    server = FileServer(write_line_function, read_line_function, logger)
     server.run()
 
 if __name__ == '__main__':

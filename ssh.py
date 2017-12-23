@@ -3,6 +3,7 @@
 from __future__ import print_function
 import argparse
 import subprocess
+import termios
 
 from file_transfer import FileClient
 #from mycmd import Cmd
@@ -45,11 +46,17 @@ class ShellClient(Cmd):
         self.terminal_ssh.open()
         self.prompt = self.terminal_ssh.wait_prompt()
         self.file_client = FileClient(self.file_transfer_ssh.write_line,
-                                      self.file_transfer_ssh.read_line)
+                                      self.file_transfer_ssh.read_line,
+                                      logger)
 
     def run(self):
-        self.doc_header = cmd_helps
-        self.cmdloop()
+        old_stdin_setting = termios.tcgetattr(sys.stdin.fileno())
+        try:
+            self.doc_header = cmd_helps
+            self.cmdloop()
+        finally:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_stdin_setting)
+            
 
     def emptyline(self):
         self.run_terminal_cmd('')
@@ -110,9 +117,10 @@ class ShellClient(Cmd):
         if line.endswith(' '):
             args.append('')
         result = []
+        logger.log('args = "%s"' % args)
         if args[0] in ('lls', 'lcd', 'lrm', 'local', 'run'):
             result = get_possible_local_paths(args[-1])
-        if args[0] in ('send', 'lcp'):
+        elif args[0] in ('send', 'lcp'):
             if len(args) == 2:
                 result = get_possible_local_paths(args[-1])
             else:
@@ -122,11 +130,14 @@ class ShellClient(Cmd):
                 result = self.get_possible_remote_paths(args[-1])
             else:
                 result = get_possible_local_paths(args[-1])
+        else:
+            logger.log('get_possible_remote_paths %s' % args[-1])
+            result = self.get_possible_remote_paths(args[-1])
         logger.log('completedefault(text="%s", line="%s", result = "%s"' % (args[-1], line, result))
         return result
 
     def get_possible_remote_paths(self, path):
-        self.sync_remote_cwd(path)
+        self.sync_remote_cwd()
         return self.file_client.get_possible_paths(path)
 
 

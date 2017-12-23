@@ -59,6 +59,8 @@ def get_possible_local_paths(path):
     path = expand_path(path)
     result = []
     dirpath, basename = os.path.split(path)
+    if not dirpath:
+        dirpath = '.'
     if os.path.isdir(dirpath):
         for item in os.listdir(dirpath):
             if item.startswith(basename):
