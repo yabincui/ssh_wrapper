@@ -116,7 +116,8 @@ class FileClient(FileBase):
             if remote_type == 'file':
                 self.error("%s is a file, can't send dir to it" % remote)
             elif remote_type == 'dir':
-                self.send_dir(local, os.path.join(remote, local))
+                basename = os.path.basename(local[:-1] if local.endswith('/') else local)
+                self.send_dir(local, os.path.join(remote, basename))
             elif remote_type == 'not_exist':
                 self.send_dir(local, remote)
 
