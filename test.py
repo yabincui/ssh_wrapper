@@ -1,5 +1,4 @@
 
-import subprocess
 import unittest
 
 from utils import *
