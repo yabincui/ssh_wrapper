@@ -25,6 +25,7 @@ cmd formats between FileClient and FileServer:
 [client] cmd: send_file
 [client] local: local_path
 [client] remote: remote_path
+[client] file_type: a, b, c  # valild types: executable
 // Split to 4K per line
 [client] data: data in hex format
 [client] data: data in hex format
@@ -34,6 +35,7 @@ cmd formats between FileClient and FileServer:
 [client] cmd: recv_file
 [client] remote: remote_path
 [client] local: local_path
+[server] file_type: a, b, c # valid types: executable
 // Split to 4K per line
 [server] data: data in hex format
 [server] data_end: data_size
@@ -147,6 +149,8 @@ class FileClient(FileBase):
         self.write_item('cmd', 'send_file')
         self.write_item('local', local)
         self.write_item('remote', remote)
+        file_type = get_file_type(local)
+        self.write_item('file_type', ', '.join(file_type))
         with open(local, 'rb') as f:
             size = 0
             while True:
@@ -169,6 +173,7 @@ class FileClient(FileBase):
         dirpath = os.path.split(local)[0]
         if dirpath:
             run_cmd('mkdir -p %s' % dirpath)
+        file_type = self.read_item('file_type')
         with open(local, 'wb') as f:
             size = 0
             while True:
@@ -183,7 +188,8 @@ class FileClient(FileBase):
                         self.error('recv_file %s to %s, sent_size %d, recv_size %d' %
                             (remote, local, sent_size, size))
                     break
-
+        if 'executable' in file_type:
+            run_cmd('chmod a+x %s' % local)
 
     def get_possible_paths(self, path):
         self.write_item('cmd', 'get_possible_paths')
@@ -202,46 +208,6 @@ class FileClient(FileBase):
     def rmdir(self, path):
         self.write_item('cmd', 'rmdir')
         self.write_item('path', path)
-
-    def test(self):
-        test_data = []
-        for i in range(65536):
-            test_data.append(chr(i / 256))
-            test_data.append(chr(i % 256))
-        test_data = ''.join(test_data)
-        # Test 1: send recv file
-        test_dir = 'file_transfer_test_dir'
-        remove(test_dir)
-        mkdir(test_dir)
-        test_file = os.path.join(test_dir, 'file_transfer_test')
-        with open(test_file, 'wb') as f:
-            f.write(test_data)
-        remote_test_dir = 'file_transfer_remote_test_dir'
-        self.remove(remote_test_dir)
-        self.mkdir(remote_test_dir)
-        remote_test_file = os.path.join(remote_test_dir, 'file_transfer_test')
-        self.send(test_file, remote_test_file)
-        recv_file = os.path.join(test_dir, 'file_transfer_recv_file')
-        self.recv(remote_test_file, recv_file)
-        def get_file_data(path):
-            with open(path, 'rb') as f:
-                return f.read()
-        if get_file_data(recv_file) != test_data:
-            self.error('send recv file failed')
-            return
-
-        # Test 2: send recv file, need to mkdir.
-        remote_test_file = os.path.join(remote_test_dir, 'dir1', 'file_transfer_test')
-        self.send(test_file, remote_test_file)
-        recv_file = os.path.join(test_dir, 'dir1', 'file_transfer_recv_file')
-        self.recv(remote_test_file, recv_file)
-        if get_file_data(recv_file) != test_data:
-            self.error('send recv file, need to mkdir failed')
-            return
-
-        remove(test_dir)
-        self.remove(remote_test_dir)
-        sys.stdout.write('test done!\n')
 
 class FileServer(FileBase):
     def run(self):
@@ -294,7 +260,8 @@ class FileServer(FileBase):
         remote = self.read_item('remote')
         dirpath = os.path.split(remote)[0]
         if dirpath:
-            run_cmd('mkdir -p %s' % dirpath)
+            mkdir(dirpath)
+        file_type = self.read_item('file_type')
         with open(remote, 'wb') as f:
             size = 0
             while True:
@@ -309,10 +276,14 @@ class FileServer(FileBase):
                         sys.stderr.write('send_file %s to %s, sent_size %d, recv_size %d' % (
                             local, remote, sent_size, size))
                     break
+        if 'executable' in file_type:
+            run_cmd('chmod a+x %s' % remote)
 
     def handle_recv_file(self):
         remote = self.read_item('remote')
         local = self.read_item('local')
+        file_type = get_file_type(remote)
+        self.write_item('file_type', ', '.join(file_type))
         with open(remote, 'rb') as f:
             size = 0
             while True:
@@ -335,6 +306,82 @@ class FileServer(FileBase):
             return
         path = expand_path(path)
         rmdir(path)
+
+class FileTransferTests(object):
+    def __init__(self, file_client):
+        self.file_client = file_client
+        test_data = []
+        for i in range(65536):
+            test_data.append(chr(i / 256))
+            test_data.append(chr(i % 256))
+        self.test_data = ''.join(test_data)
+        self.test_dir = 'file_transfer_test_dir'
+        self.remote_test_dir = 'file_transfer_remote_test_dir'
+
+    def write_test_file(self, path):
+        with open(path, 'wb') as f:
+            f.write(self.test_data)
+
+    def check_test_file(self, path, expected_path):
+        def get_file_data(path):
+            with open(path, 'rb') as f:
+                return f.read()
+        if get_file_data(path) != get_file_data(expected_path):
+            self.file_client.error('send recv file failed')
+
+    def setup_test(self):
+        remove(self.test_dir)
+        mkdir(self.test_dir)
+        self.file_client.remove(self.remote_test_dir)
+        self.file_client.mkdir(self.remote_test_dir)
+
+    def teardown_test(self):
+        remove(self.test_dir)
+        self.file_client.remove(self.remote_test_dir)
+
+    def test_send_recv_file(self):
+        self.setup_test()
+        test_file = os.path.join(self.test_dir, 'file_transfer_test')
+        self.write_test_file(test_file)
+        remote_test_file = os.path.join(self.remote_test_dir, 'file_transfer_test')
+        self.file_client.send(test_file, remote_test_file)
+        recv_file = os.path.join(self.test_dir, 'file_transfer_recv_file')
+        self.file_client.recv(remote_test_file, recv_file)
+        self.check_test_file(recv_file, test_file)
+        self.teardown_test()
+
+    def test_send_recv_file_with_mkdir(self):
+        self.setup_test()
+        test_file = os.path.join(self.test_dir, 'file_transfer_test')
+        self.write_test_file(test_file)
+        remote_test_file = os.path.join(self.remote_test_dir, 'dir1', 'file_transfer_test')
+        self.file_client.send(test_file, remote_test_file)
+        recv_file = os.path.join(self.test_dir, 'dir1', 'file_transfer_recv_file')
+        self.file_client.recv(remote_test_file, recv_file)
+        self.check_test_file(recv_file, test_file)
+        self.teardown_test()
+
+    def test_send_recv_exec_file(self):
+        self.setup_test()
+        test_file = os.path.join(get_script_dir(), 'testdata', 'exe_file')
+        remote_test_file = os.path.join(self.remote_test_dir, 'dir1', 'file_transfer_test')
+        self.file_client.send(test_file, remote_test_file)
+        recv_file = os.path.join(self.test_dir, 'dir1', 'file_transfer_recv_file')
+        self.file_client.recv(remote_test_file, recv_file)
+        self.check_test_file(recv_file, test_file)
+        file_type = get_file_type(recv_file)
+        if 'execute' not in file_type:
+            self.file_client.error('file_type is wrong: %s' % file_type)
+        self.teardown_test()
+
+        
+
+def run_file_transfer_tests(file_client):
+    test = FileTransferTests(file_client)
+    test.test_send_recv_file()
+    test.test_send_recv_file_with_mkdir()
+    test.test_send_recv_exec_file()
+    sys.stdout.write('test done!\n')
 
 
 def run_file_server():

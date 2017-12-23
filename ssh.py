@@ -5,8 +5,7 @@ import argparse
 import subprocess
 import termios
 
-from file_transfer import FileClient
-#from mycmd import Cmd
+from file_transfer import FileClient, run_file_transfer_tests
 from cmd import Cmd
 from ssh_connection import SshConnectionTerminal, SshConnectionNonTerminal
 from utils import *
@@ -158,7 +157,7 @@ class ShellClient(Cmd):
         return self.file_client.get_possible_paths(path)
 
     def run_test(self):
-        self.file_client.test()
+        run_file_transfer_tests(self.file_client)
 
 
 def main():

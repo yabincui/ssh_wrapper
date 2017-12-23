@@ -83,4 +83,11 @@ def touch(path):
 def remove(path):
     run_cmd('rm -rf %s' % path)
 
+def get_file_type(path):
+    result = []
+    if os.path.isfile(path) and os.access(path, os.X_OK):
+        result.append('executable')
+    return result
 
+def get_script_dir():
+    return os.path.dirname(os.path.realpath(__file__))
