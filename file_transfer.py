@@ -427,7 +427,7 @@ class FileServer(FileBase):
         dirs = []
         files = []
         links = []
-        for item in os.path.listdir(path):
+        for item in os.listdir(path):
             sub_path = os.path.join(path, item)
             if os.path.islink(sub_path):
                 links.append(item)
@@ -461,7 +461,7 @@ class FileTransferTests(object):
                 return f.read()
         file_type = get_file_type(path)
         expected_file_type = get_file_type(expected_path)
-        if get_file_data(path) != get_file_data(expected_path) or file_type != expected_path:
+        if get_file_data(path) != get_file_data(expected_path) or file_type != expected_file_type:
             self.file_client.error('check_file(%s, %s) failed' % (path, expected_path))
 
     def check_link(self, path, expected_path):
@@ -519,7 +519,7 @@ class FileTransferTests(object):
         self.file_client.send(test_file, remote_test_file)
         recv_file = os.path.join(self.test_dir, 'file_transfer_recv_file')
         self.file_client.recv(remote_test_file, recv_file)
-        self.check_test_file(recv_file, test_file)
+        self.check_file(recv_file, test_file)
         self.teardown_test()
 
     def test_send_recv_file_with_mkdir(self):
@@ -530,7 +530,7 @@ class FileTransferTests(object):
         self.file_client.send(test_file, remote_test_file)
         recv_file = os.path.join(self.test_dir, 'dir1', 'file_transfer_recv_file')
         self.file_client.recv(remote_test_file, recv_file)
-        self.check_test_file(recv_file, test_file)
+        self.check_file(recv_file, test_file)
         self.teardown_test()
 
     def test_send_recv_exec_file(self):
@@ -568,6 +568,7 @@ def run_file_transfer_tests(file_client):
     test.test_send_recv_file_with_mkdir()
     test.test_send_recv_exec_file()
     test.test_send_recv_link_file()
+    test.test_send_recv_dirs()
     sys.stdout.write('test done!\n')
 
 
