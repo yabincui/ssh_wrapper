@@ -1,5 +1,6 @@
 import fcntl
 import os
+import struct
 import subprocess
 import sys
 import termios
@@ -27,8 +28,8 @@ def log_exit(msg):
 class Logger(object):
     def __init__(self, log_file):
         self.lock = threading.Lock()
-        self.log_file = log_file
-        self.fh = open(log_file, 'w')
+        self.log_file = expand_path(log_file)
+        self.fh = open(self.log_file, 'w')
     
     def log(self, msg):
         if not msg or msg[-1] != '\n':
@@ -44,17 +45,12 @@ def split_lines(s):
     return lines
 
 def make_file_nonblocking(fh):
-    fd = fh.fileno()
+    if type(fh) == int:
+        fd = fh
+    else:
+        fd = fh.fileno()
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-def use_raw_stdin():
-    old_stdin_setting = termios.tcgetattr(sys.stdin.fileno())
-    tty.setraw(sys.stdin.fileno())
-    return old_stdin_setting
-
-def restore_stdin(old_stdin_setting):
-    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_stdin_setting)
 
 def to_hex_str(s):
     res = []
@@ -106,3 +102,22 @@ def split_string(s, sep=', '):
     if not s:
         return []
     return s.split(sep)
+
+def set_stdin_raw():
+    old_stdin_setting = termios.tcgetattr(sys.stdin.fileno())
+    tty.setraw(sys.stdin.fileno())
+    new_stdin_setting = termios.tcgetattr(sys.stdin.fileno())
+    # Still want to change \n to \r\n.
+    new_stdin_setting[1] |= termios.OPOST
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, new_stdin_setting)
+    return old_stdin_setting
+
+def restore_stdin(stdin_setting):
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, stdin_setting)
+
+def get_terminal_size(fd):
+    h, w, hp, wp = struct.unpack('HHHH', fcntl.ioctl(fd, termios.TIOCGWINSZ, struct.pack('HHHH', 0, 0, 0, 0)))
+    return w, h
+
+def set_terminal_size(fd, width, height):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))

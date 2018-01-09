@@ -1,5 +1,7 @@
 import collections
 import os
+from Queue import Queue
+
 from utils import *
 
 
@@ -140,6 +142,7 @@ class FileClient(FileBase):
         if not remote.endswith('/'):
             remote += '/'
         self.logger.log('send_dir(local %s, remote %s)' % (local, remote))
+        self.rmdir(remote)
         self.mkdir(remote)
         for root, dirs, files in os.walk(local):
             for d in dirs:
@@ -295,6 +298,103 @@ class FileClient(FileBase):
         self.write_item('cmd', 'rmdir')
         self.write_item('path', path)
 
+class FileTransferError(Exception):
+    pass
+
+class FileClientCmdInterface(object):
+    def __init__(self, write_line_function, logger):
+        self.logger = logger
+        self.read_queue = Queue()
+        def read_line_function():
+            return self.read_queue.get()
+        self.client = FileClient(write_line_function, read_line_function, logger)
+        self.cmds = ['lls', 'lcp', 'lcd', 'lrm', 'lmkdir', 'local',
+                     'rcp', 'send', 'recv', 'test', 'help']
+        self.current_dir = ''
+
+    def is_cmd_supported(self, cmdline):
+        args = cmdline.split()
+        return args and args[0] in self.cmds
+
+    def error(self, msg):
+        sys.stderr.write(msg + '\n')
+        raise FileTransferError()
+
+    def set_current_dir(self, new_current_dir):
+        if self.current_dir != new_current_dir:
+            self.current_dir = new_current_dir
+            self.client.set_remote_cwd(self.current_dir)
+
+    def add_input(self, data):
+        self.read_queue.put(data)
+
+    def run_cmd(self, cmdline):
+        try:
+            args = cmdline.split()
+            if args[0] in ('lls', 'lrm', 'lmkdir'):
+                args[0] = args[0][1:]
+                self.run_local_cmd(args)
+            elif args[0] == 'local':
+                self.run_local_cmd(args[1:])
+            elif args[0] == 'lcd':
+                self.chdir(args)
+            elif args[0] in ('lcp', 'send'):
+                self.send_files(args)
+            elif args[0] in ('rcp', 'recv'):
+                self.recv_files(args)
+            elif args[0] == 'test':
+                self.run_test()
+            elif args[0] == 'help':
+                self.print_help()
+            else:
+                self.error('unexpected file transfer cmd: ' + args[0])
+        except FileTransferError:
+            return False
+        return True
+
+    def run_local_cmd(self, args):
+        if subprocess.call(' '.join(args), shell=True) != 0:
+            self.error('run %s failed' % (' '.join(args)))
+
+    def chdir(self, args):
+        if len(args) != 2:
+            self.error('wrong chdir path')
+        path = expand_path(args[1])
+        if not os.path.isdir(path):
+            self.error("path '%s' isn't a directory." % path)
+        os.chdir(path)
+
+    def send_files(self, args):
+        if len(args) != 3:
+            self.error('wrong options, need `%s local remote`.' % args[0])
+        self.client.send(args[1], args[2])
+
+    def recv_files(self, args):
+        if len(args) != 3:
+            self.error('wrong options, need `%s remote local`.' % args[0])
+        self.client.recv(args[1], args[2])
+
+    def run_test(self):
+        run_file_transfer_tests(self.client)
+
+    def print_help(self):
+        sys.stdout.write(
+"""
+    lls   -- run `ls` in local machine.
+    lcd   -- run `cd` in local machine.
+    lrm   -- run `rm` in local machine.
+    lmkdir -- run `mkdir` in local machine.
+    local cmd args...  -- run `cmd args...` in local machine.
+    rcp   -- alias to recv cmd.
+    send local_path remote_path -- send local files to remote.
+    recv remote_path local_path -- recv remote files to local.
+    lcp   -- alias to send cmd.
+    rcp   -- alias to recv cmd.
+    run script_path -- run a script.
+    test  -- run file transfer test.
+""")
+
+
 class FileServer(FileBase):
     def run(self):
         while True:
@@ -434,7 +534,7 @@ class FileServer(FileBase):
         self.write_item('dirs', ', '.join(dirs))
         self.write_item('files', ', '.join(files))
         self.write_item('links', ', '.join(links))
-            
+
 
 class FileTransferTests(object):
     def __init__(self, file_client):

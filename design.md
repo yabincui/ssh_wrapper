@@ -43,7 +43,30 @@ About the protocol:
   https://en.wikipedia.org/wiki/ANSI_escape_code
   http://ascii-table.com/ansi-escape-sequences.php
 
+
+Ssh2:
+Use a single ssh connection, but can switch between terminal and non terminal mode.
+Support vi mode, use a single shell backend.
+
+use a protocol to wrap terminal msg and non terminal msg. (done)
+support control msgs for vi.
+terminal rows/columns. Or we try forkpty?
+  send window size change signal, SIGWINCH.
+  https://stackoverflow.com/questions/33155143/how-to-make-a-child-process-use-another-terminal-input-and-output
+
+can support part of the vi function, but still need to further debug why something isn't correct.
+  build a forkpty, dump all control data, analysis where is wrong.
+TERM env is needed to support vi/man/info.
+
+Split logs, enable only log part of the messages.
+
+Add file transfer cmds.
+
+
+
 SshSyncer: monitor file systems change and sync between local and server
   The sync is in one direction, either from server to local, or from local to server.
 
 SshSyncer can read configs from ~/.sshwrapper.config or ./sshwrapper.config.
+
+Support tab prompt.

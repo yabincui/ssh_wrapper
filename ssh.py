@@ -10,7 +10,7 @@ from cmd import Cmd
 from ssh_connection import SshConnectionTerminal, SshConnectionNonTerminal
 from utils import *
 
-logger = Logger('./sshwrapper.log')
+logger = Logger('../sshwrapper.log')
 
 cmd_helps = """
             lls   -- run `ls` in local machine.

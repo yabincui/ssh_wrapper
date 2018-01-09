@@ -34,38 +34,21 @@ class SshConnectionBase(object):
 
     def _run_poll_thread(self):
         # poll thread
+        poll_obj = select.poll()
+        poll_obj.register(self.popen_obj.stdout)
+        event_mask = select.POLLIN | select.POLLERR | select.POLLHUP | select.POLLNVAL
         make_file_nonblocking(self.popen_obj.stderr)
         make_file_nonblocking(self.popen_obj.stdout)
-        if sys.platform == 'darwin':
-            kq = select.kqueue()
-            stdout_event = select.kevent(self.popen_obj.stdout.fileno(),
-                    filter=select.KQ_FILTER_READ, flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE)
-            stderr_event = select.kevent(self.popen_obj.stderr.fileno(),
-                    filter=select.KQ_FILTER_READ, flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE)
-            while True:
-                revents = kq.control([stdout_event, stderr_event], 2, None)
-                for event in revents:
-                    if event.ident == self.popen_obj.stdout.fileno():
-                        self._handle_remote_stdout_event()
-                    else:
-                        self._handle_remote_stderr_event()
-        else:
-            poll_obj = select.poll()
-            poll_obj.register(self.popen_obj.stdout)
-            event_mask = select.POLLIN | select.POLLERR | select.POLLHUP | select.POLLNVAL
-            poll_obj.register(self.popen_obj.stderr.fileno(), event_mask)
-            poll_obj.register(self.popen_obj.stdout.fileno(), event_mask)
-            while True:
-                event_list = poll_obj.poll()
-                for fd, event in event_list:
-                    self._dump_event(fd, event)
-                    if event & select.POLLHUP:
-                        self.close()
-                        break
-                    if fd == self.popen_obj.stdout.fileno():
-                        self._handle_remote_stdout_event()
-                    elif fd == self.popen_obj.stderr.fileno():
-                        self._handle_remote_stderr_event()
+        poll_obj.register(self.popen_obj.stderr.fileno(), event_mask)
+        poll_obj.register(self.popen_obj.stdout.fileno(), event_mask)
+        while True:
+            event_list = poll_obj.poll()
+            for fd, event in event_list:
+                self._dump_event(fd, event)
+                if fd == self.popen_obj.stdout.fileno():
+                    self._handle_remote_stdout_event(event)
+                elif fd == self.popen_obj.stderr.fileno():
+                    self._handle_remote_stderr_event(event)        
 
     def _dump_event(self, fd, event):
         # poll thread
@@ -85,22 +68,28 @@ class SshConnectionBase(object):
             event_name += 'POLLNVAL '
         self._log('event: fd = %s, event_name %s' % (fd_name, event_name))
 
-    def _handle_remote_stdout_event(self):
+    def _handle_remote_stdout_event(self, event):
         # poll thread
-        data = self.popen_obj.stdout.read()
-        if not data:
+        if event & select.POLLIN:
+            data = self.popen_obj.stdout.read()
+            if not data:
+                self.close()
+                return
+            self._log('remote stdout "%s"' % data)
+            self.receive_stdout_data(data)
+        if event & select.POLLHUP:
             self.close()
-            return
-        self._log('remote stdout "%s"' % data)
-        self.receive_stdout_data(data)
 
-    def _handle_remote_stderr_event(self):
+    def _handle_remote_stderr_event(self, event):
         # poll thread
-        data = self.popen_obj.stderr.read()
-        self._log('remote stderr "%s"' % data)
-        if not data:
+        if event & select.POLLIN:
+            data = self.popen_obj.stderr.read()
+            self._log('remote stderr "%s"' % data)
+            if not data:
+                self.close()
+            sys.stderr.write(data)
+        if event & select.POLLHUP:
             self.close()
-        sys.stderr.write(data)
 
     def receive_stdout_data(self, data):
         # poll thread
