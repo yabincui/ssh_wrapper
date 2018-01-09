@@ -259,7 +259,8 @@ class InputController(object):
                     sys.stdout.write('\n')
                     return '\n'
                 elif ord(c) == 0x9: # tab
-                    continue
+                    self.cmdline += c
+                    return self.cmdline
                 else:
                     self.cmdline += c
                     sys.stdout.write(c)
@@ -333,20 +334,44 @@ class CmdEndMarker(object):
         self.wait_init_prompt_flag = True
         self.init_prompt_q = Queue()
         self.current_dir = ''
+        self.collect_wait_echo_prev_cmd = False
+        self.echo_prev_cmd_q = Queue()
 
     def wait_init_prompt(self):
         self.init_prompt_q.get()
 
-    def mark_new_cmdline(self, cmdline):
+    def mark_new_cmdline(self, cmdline, from_complete):
         with self.lock:
             self.need_omit_cmdline_echo = True
             self.want_cmd_end_mark = True
             self.has_cmd_end_mark = False
             self.last_line = ''
+        if cmdline.endswith('\t'):
+            return cmdline
         cmdline = cmdline.rstrip()
-        if cmdline:
+        if cmdline or from_complete:
             cmdline += ' ; '
         return cmdline + ('echo %s$?$PWD.\n' % self.CMD_END_MARK)
+
+    def mark_echo_prev_cmd_cmdline(self):
+        with self.lock:
+            self.collect_wait_echo_prev_cmd = True
+        return 'echo !!\n'
+
+    def wait_prev_cmdline(self):
+        data = ''
+        while True:
+            data += self.echo_prev_cmd_q.get()
+            if data.endswith('# ') or data.endswith('$ '):
+                with self.lock:
+                    self.collect_wait_echo_prev_cmd = False
+                break
+        lines = data.split('\n')
+        start_pos = 5
+        end_pos = lines[1].find(';') - 1
+        prev_cmd = lines[1][start_pos:end_pos]
+        self.logger.log('lines = (%s), prev_cmd = (%s)' % (lines, prev_cmd))
+        return prev_cmd
 
     def receive_output(self, data):
         with self.lock:
@@ -357,6 +382,9 @@ class CmdEndMarker(object):
                     self.init_prompt_q.put('a')
                 else:
                     self.last_line = total_data[total_data.rfind('\n')+1:]
+                return
+            if self.collect_wait_echo_prev_cmd:
+                self.echo_prev_cmd_q.put(data)
                 return
             if self.need_omit_cmdline_echo:
                 pos = data.find('\n')
@@ -458,7 +486,10 @@ class SSHClient(object):
             init_data = self.set_terminal_env()
             while True:
                 cmdline = self.input_obj.read_cmdline(init_data)
-                init_data = self.run_cmdline(cmdline)
+                if cmdline.endswith('\t'):
+                    init_data = self.run_complete_cmdline(cmdline)
+                else:
+                    init_data = self.run_cmdline(cmdline)
 
         except NoInputException:
             pass
@@ -466,6 +497,26 @@ class SSHClient(object):
         self.logger.log('run finished')
         self.input_obj.restore_stdin()
         os._exit(0)
+
+    def run_complete_cmdline(self, cmdline):
+        self.terminal_obj.erase_last_characters(len(cmdline) - 1)
+        self.msg_helper.write_terminal_msg(cmdline)
+        while True:
+            data = self.input_obj.read_data()
+            if data.endswith('\n') or data.endswith('\r'):
+                sys.stdout.write('\n')
+                return_data = self.run_terminal_cmdline(data, from_complete=True)
+                break
+            elif data.endswith('\x03'): # ctrl-c
+                self.msg_helper.write_terminal_msg(data)
+                return ''
+            else:
+                self.msg_helper.write_terminal_msg(data)
+        cmdline = self.cmd_end_marker.mark_echo_prev_cmd_cmdline()
+        self.msg_helper.write_terminal_msg(cmdline)
+        prev_cmdline = self.cmd_end_marker.wait_prev_cmdline()
+        self.input_obj.cmd_history.add_cmd(prev_cmdline)
+        return return_data
 
     def set_terminal_env(self):
         if 'TERM' in os.environ:
@@ -489,8 +540,9 @@ class SSHClient(object):
         else:
             return self.run_terminal_cmdline(cmdline)
 
-    def run_terminal_cmdline(self, cmdline):
-        cmdline = self.cmd_end_marker.mark_new_cmdline(cmdline)
+    def run_terminal_cmdline(self, cmdline, from_complete=False):
+        self.logger.log('run_terminal_cmdline(%s)' % cmdline)
+        cmdline = self.cmd_end_marker.mark_new_cmdline(cmdline, from_complete)
         self.msg_helper.write_terminal_msg(cmdline)
         while True:
             data = self.input_obj.read_data()
