@@ -254,6 +254,12 @@ class InputController(object):
                         self.terminal.erase_last_characters()
                 elif ord(c) == 0x1b: # ESC
                     in_esc_mode = True
+                elif ord(c) == 0x3: # ctrl-c
+                    # support ctrl-c for stopping current command.
+                    sys.stdout.write('\n')
+                    return '\n'
+                elif ord(c) == 0x9: # tab
+                    continue
                 else:
                     self.cmdline += c
                     sys.stdout.write(c)
