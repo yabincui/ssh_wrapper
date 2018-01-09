@@ -468,7 +468,7 @@ class SSHClient(object):
 
     def handle_window_size_change(self):
         def update_window_size():
-            w, h = get_terminal_size(sys.stdin.fileno())
+            w, h = get_terminal_size(0)
             self.msg_helper.write_window_msg('%d_%d' % (w, h))
             
         def handler(signum, frames):

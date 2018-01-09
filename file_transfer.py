@@ -385,10 +385,9 @@ class FileClientCmdInterface(object):
     lrm   -- run `rm` in local machine.
     lmkdir -- run `mkdir` in local machine.
     local cmd args...  -- run `cmd args...` in local machine.
-    rcp   -- alias to recv cmd.
     send local_path remote_path -- send local files to remote.
-    recv remote_path local_path -- recv remote files to local.
     lcp   -- alias to send cmd.
+    recv remote_path local_path -- recv remote files to local.
     rcp   -- alias to recv cmd.
     run script_path -- run a script.
     test  -- run file transfer test.
