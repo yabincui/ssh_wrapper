@@ -383,7 +383,7 @@ class SSHClient(object):
 
     def run_complete_cmdline(self, cmdline):
         self.msg_helper.write_terminal_msg(cmdline)
-        self.wait_cmd_finish()
+        return self.wait_cmd_finish()
 
     def set_terminal_env(self):
         if 'TERM' in os.environ:
