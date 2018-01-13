@@ -262,6 +262,10 @@ class InputController(object):
                 elif ord(c) == 0x9: # tab
                     self.cmdline += c
                     return self.cmdline
+                elif ord(c) == 0x12: # ctrl-r
+                    # support ctrl-r for searching cmd history
+                    self.cmdline += c
+                    return self.cmdline
                 else:
                     self.cmdline += c
                     sys.stdout.write(c)
@@ -338,6 +342,8 @@ class CmdEndMarker(object):
         self.current_dir = ''
         self.collect_wait_echo_prev_cmd = False
         self.echo_prev_cmd_q = Queue()
+        self.wait_cmd_prompt = False
+        self.has_cmd_prompt = False
 
     def wait_init_prompt(self):
         self.init_prompt_q.get()
@@ -376,6 +382,19 @@ class CmdEndMarker(object):
         prev_cmd = lines[1][start_pos:end_pos]
         self.logger.log('lines = (%s), prev_cmd = (%s)' % (lines, prev_cmd))
         return prev_cmd
+
+    def mark_wait_cmd_prompt(self):
+        with self.lock:
+            self.wait_cmd_prompt = True
+            self.has_cmd_prompt = False
+
+    def has_cmd_prompt_flag(self):
+        with self.lock:
+            if self.has_cmd_prompt:
+                self.has_cmd_prompt = False
+                self.wait_cmd_prompt = False
+                return True
+            return False
 
     def receive_output(self, data):
         with self.lock:
@@ -418,6 +437,13 @@ class CmdEndMarker(object):
                         self.last_line = total_data[total_data.rfind('\n')+1:]
                         if len(self.last_line) > 300:
                             self.last_line = self.last_line[-300:]
+            if self.wait_cmd_prompt and not self.has_cmd_prompt:
+                total_data = self.last_line + data
+                if is_prompt_string(total_data):
+                    self.has_cmd_prompt = True
+                self.last_line = total_data[total_data.rfind('\n')+1:]
+                if len(self.last_line) > 300:
+                    self.last_line = self.last_line[-300:]
         self.terminal.receive_output(data)
 
     def is_cmd_finished(self):
@@ -496,6 +522,8 @@ class SSHClient(object):
                 cmdline = self.input_obj.read_cmdline(init_data)
                 if cmdline.endswith('\t'):
                     init_data = self.run_complete_cmdline(cmdline)
+                elif cmdline.endswith('\x12'): # ctrl-r
+                    init_data = self.run_searched_cmdline(cmdline)
                 else:
                     init_data = self.run_cmdline(cmdline)
 
@@ -526,6 +554,20 @@ class SSHClient(object):
         self.input_obj.cmd_history.add_cmd(prev_cmdline)
         return return_data
 
+    def run_until_cmd_prompt(self, cmdline):
+        self.cmd_end_marker.mark_wait_cmd_prompt()
+        self.msg_helper.write_terminal_msg(cmdline)
+        while True:
+            data = self.input_obj.read_data()
+            if self.cmd_end_marker.has_cmd_prompt_flag():
+                return data
+            self.msg_helper.write_terminal_msg(data)
+    
+    def run_searched_cmdline(self, cmdline):
+        self.cmd_end_marker.mark_new_cmdline(cmdline, False)
+        self.msg_helper.write_terminal_msg(cmdline)        
+        return self.wait_cmd_finish()
+
     def set_terminal_env(self):
         if 'TERM' in os.environ:
             return self.run_cmdline('export TERM=%s' % os.environ['TERM'])
@@ -552,6 +594,9 @@ class SSHClient(object):
         self.logger.log('run_terminal_cmdline(%s)' % cmdline)
         cmdline = self.cmd_end_marker.mark_new_cmdline(cmdline, from_complete)
         self.msg_helper.write_terminal_msg(cmdline)
+        return  self.wait_cmd_finish()
+
+    def wait_cmd_finish(self):
         while True:
             data = self.input_obj.read_data()
             if self.cmd_end_marker.is_cmd_finished():
