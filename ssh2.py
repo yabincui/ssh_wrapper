@@ -353,6 +353,8 @@ class CmdEndMarker(object):
         cmdline = cmdline.rstrip()
         if cmdline or from_complete:
             cmdline += ' ; '
+        if not cmdline:
+            return 'echo %s0$PWD.\n' % self.CMD_END_MARK
         return cmdline + ('echo %s$?$PWD.\n' % self.CMD_END_MARK)
 
     def mark_echo_prev_cmd_cmdline(self):
@@ -396,23 +398,26 @@ class CmdEndMarker(object):
                 self.need_omit_cmdline_echo = False
             self.logger.log('want_cmd_end_mark = %d, has_end_mark = %d' % (self.want_cmd_end_mark, self.has_cmd_end_mark))
             if self.want_cmd_end_mark and not self.has_cmd_end_mark:
-                total_data = self.last_line + data
-                m = self.mark_pattern.search(total_data)
-                self.logger.log('m = %s' % m)
-                if m:
+                if data == '^C': # ^C, the cmd has been stopped.
                     self.has_cmd_end_mark = True
-                    self.logger.log('last_line = (%s), m.start() = %d' % (self.last_line, m.start()))
-                    if m.start() < len(self.last_line):
-                        self.terminal.erase_last_characters(len(self.last_line) - m.start())
-                    data = total_data[len(self.last_line):m.start()]
-                    if int(m.group(1)) != 0:
-                        data += self.CMD_END_MARK + m.group(1) + '.\r\n'
-                    data += total_data[m.end():]
-                    self.current_dir = m.group(2)
                 else:
-                    self.last_line = total_data[total_data.rfind('\n')+1:]
-                    if len(self.last_line) > 300:
-                        self.last_line = self.last_line[-300:]
+                    total_data = self.last_line + data
+                    m = self.mark_pattern.search(total_data)
+                    self.logger.log('m = %s' % m)
+                    if m:
+                        self.has_cmd_end_mark = True
+                        self.logger.log('last_line = (%s), m.start() = %d' % (self.last_line, m.start()))
+                        if m.start() < len(self.last_line):
+                            self.terminal.erase_last_characters(len(self.last_line) - m.start())
+                        data = total_data[len(self.last_line):m.start()]
+                        if int(m.group(1)) != 0:
+                            data += self.CMD_END_MARK + m.group(1) + '.\r\n'
+                        data += total_data[m.end():]
+                        self.current_dir = m.group(2)
+                    else:
+                        self.last_line = total_data[total_data.rfind('\n')+1:]
+                        if len(self.last_line) > 300:
+                            self.last_line = self.last_line[-300:]
         self.terminal.receive_output(data)
 
     def is_cmd_finished(self):
