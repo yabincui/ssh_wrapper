@@ -17,6 +17,7 @@ import signal
 import subprocess
 import termios
 import threading
+import time
 import tty
 
 from file_transfer import FileClientCmdInterface, FileServer
@@ -39,10 +40,12 @@ class MsgHelper(object):
         // F - for file transfer cmd.
         // E - client has closed connection.
         // W - set window size.
+        // S - sync dir between shell and SSHServer.
         // SSHServer to SSHClient:
         // T - terminal data, please pass directly to the client terminal.
         // F - for file transfer cmd.
         // E - server has closed connection.
+        // S - reply new dir of SSHServer.
         char type;
         uint32_t size;  // size of msg data
         char data[size];
@@ -64,6 +67,9 @@ class MsgHelper(object):
 
     def write_file_msg(self, data):
         self.write_msg('F', data)
+
+    def write_sync_dir_msg(self, data):
+        self.write_msg('S', data)
 
     def write_msg(self, type, data):
         msg = type + ('%04x' % len(data)) + data
@@ -92,8 +98,8 @@ class SSHServer(object):
         sys.stdout.flush()
         self.logger = Logger('~/ssh2.log')
         self.msg_helper = MsgHelper(sys.stdin, sys.stdout, self.logger)
-        self.create_child_shell()
         self.child_pid, self.pty_fd = self.create_child_shell()
+        self.shell_pid = None
         self.poll_thread = threading.Thread(target=self._run_poll_thread)
         self.poll_thread.start()
         self.start_file_server()
@@ -152,11 +158,31 @@ class SSHServer(object):
                     set_terminal_size(self.pty_fd, w, h)
                 elif msg_type == 'F':
                     self.file_data_q.put(msg_data)
+                elif msg_type == 'S':
+                    self.sync_dir_with_shell()
                 else:
                     sys.stderr.write('unsupported msg_type %s' % msg_type)
         except Exception as e:
             self.logger.log('exception %s' % e)
             raise
+
+    def sync_dir_with_shell(self):
+        cur_dir = os.getcwd()
+        if self.shell_pid is None:
+            self.shell_pid = self.find_shell_pid()
+        shell_dir = os.readlink('/proc/%d/cwd' % self.shell_pid)
+        if cur_dir != shell_dir:
+            os.chdir(shell_dir)
+        self.msg_helper.write_sync_dir_msg(('readlink /proc/%d/cwd, ' % self.shell_pid) + shell_dir)
+
+    def find_shell_pid(self):
+        output = subprocess.check_output('ps -eo ppid,pid | grep %d' % self.child_pid, shell=True)
+        for line in output.split('\n'):
+            items = line.strip().split()
+            if len(items) == 2 and items[0] == str(self.child_pid):
+                return int(items[1])
+        return None
+
 
 def run_ssh_server():
     ssh_server = SSHServer()
@@ -181,34 +207,6 @@ class TerminalController(object):
         sys.stdout.write('\033[%dD\033[0K' % count)
         sys.stdout.flush()
 
-class CmdHistory(object):
-    def __init__(self, logger):
-        self.logger = logger
-        self.history = []
-        self.pos = 0
-
-    def get_prev_cmd(self):
-        if self.pos > 0:
-            self.pos -= 1
-            self.logger.log('history pos = %d' % self.pos)
-            return self.history[self.pos]
-        return ''
-
-    def get_next_cmd(self):
-        if self.pos < len(self.history):
-            self.pos += 1
-            self.logger.log('history pos = %d' % self.pos)
-            return self.history[self.pos - 1]
-        return ''
-
-    def add_cmd(self, cmdline):
-        cmdline = cmdline.strip('\r\n')
-        if not cmdline:
-            return
-        self.logger.log('history[%d] = %s' % (len(self.history), cmdline))
-        self.history.append(cmdline)
-        self.pos = len(self.history)
-
 class NoInputException(Exception):
     pass
 
@@ -218,7 +216,6 @@ class InputController(object):
     def __init__(self, terminal, logger):
         self.terminal = terminal
         self.logger = logger
-        self.cmd_history = CmdHistory(self.logger)
         self.old_stdin_setting = set_stdin_raw()
         self.input_queue = Queue()
         self.eof_lock = threading.Lock()
@@ -239,77 +236,32 @@ class InputController(object):
 
     def read_cmdline(self, init_data):
         data = init_data
-        in_esc_mode = False
-        esc_data = ''
-        self.cmdline = ''
+        cmdline = ''
+        want_return = False
         while True:
-            for c in data:
-                if in_esc_mode:
-                    esc_data += c
-                    if self.handle_esc_data(esc_data):
-                        in_esc_mode = False
-                        esc_data = ''
-                elif ord(c) == 0x7f:  # DEL
-                    if self.cmdline:
-                        self.cmdline = self.cmdline[:-1]
+            i = 0
+            while i < len(data):
+                c = data[i]
+                if ord(c) == 0x7f:  # DEL
+                    if cmdline:
+                        cmdline = cmdline[:-1]
                         self.terminal.erase_last_characters()
-                elif ord(c) == 0x1b: # ESC
-                    in_esc_mode = True
-                elif ord(c) == 0x3: # ctrl-c
-                    # support ctrl-c for stopping current command.
-                    sys.stdout.write('\n')
-                    return '\n'
-                elif ord(c) == 0x9: # tab
-                    self.cmdline += c
-                    return self.cmdline
-                elif ord(c) == 0x12: # ctrl-r
-                    # support ctrl-r for searching cmd history
-                    self.cmdline += c
-                    return self.cmdline
-                else:
-                    self.cmdline += c
-                    sys.stdout.write(c)
-                    sys.stdout.flush()
-            if self.cmdline.endswith('\n') or self.cmdline.endswith('\r'):
-                break
+                    i += 1
+                    continue
+                elif ord(c) == 0x1b:  # ESC
+                    want_return = True
+                elif ord(c) in [0x3, 0x9, 0x12, 0x0a, 0x0d]:  # ctrl-c, tab, ctrl-r, \n, \r
+                    want_return = True
+                if want_return:
+                    if cmdline:
+                        self.terminal.erase_last_characters(len(cmdline))
+                    cmdline += data[i:]
+                    return cmdline
+                cmdline += c
+                sys.stdout.write(c)
+                sys.stdout.flush()
+                i += 1
             data = self.read_data()
-            self.logger.log('read_cmd, read_data(%s)(%s)' % (data, to_hex_str(data)))
-        self.logger.log('read_cmdline(%s)' % self.cmdline)
-        if self.cmdline.endswith('\r'):
-            #cmdline += '\n'
-            sys.stdout.write('\n')
-        self.cmd_history.add_cmd(self.cmdline)
-        return self.cmdline
-
-    def handle_esc_data(self, esc_data):
-        if esc_data[0] == '[':
-            if len(esc_data) == 1:
-                return False
-            if esc_data[1] == 'A':
-                # Esc[A  Move cursor up 1 line  -- use prev cmd in history
-                cmdline = self.cmd_history.get_prev_cmd()
-                self.reset_cmdline(cmdline)
-                return True
-            elif esc_data[1] == 'B':
-                # Esc[B Move cursor down 1 line  -- use next cmd in history
-                cmdline = self.cmd_history.get_next_cmd()
-                self.reset_cmdline(cmdline)
-                return True
-            #elif esc_data.endswith('R'):
-            #    # Esc[{Row};{Column}R  -- report current cursor position.
-            #    m = re.match(r'[\d+;\d+R', esc_data)
-            #    if m:
-                    
-        self.logger.log('unexpected esc_data %s(%s)' % (esc_data, to_hex_str(esc_data)))
-        return False
-
-    def reset_cmdline(self, cmdline):
-        if self.cmdline:
-            self.terminal.erase_last_characters(len(self.cmdline))
-        self.cmdline = cmdline
-        self.logger.log('reset_cmdline %s' % self.cmdline)
-        sys.stdout.write(self.cmdline)
-        sys.stdout.flush()
 
     def read_data(self):
         data = self.input_queue.get()
@@ -323,140 +275,33 @@ class InputController(object):
         restore_stdin(self.old_stdin_setting)
 
 class CmdEndMarker(object):
-    """ Mark the end of a command. Decide what to show in the terminal. """
-
-    CMD_END_MARK = 'cmd has finished with code '
+    """ Find cmd prompt from output flow. """
 
     def __init__(self, terminal, logger):
         self.terminal = terminal
         self.logger = logger
         self.lock = threading.Lock()
         # All below are protected by self.lock.
-        self.need_omit_cmdline_echo = False
-        self.want_cmd_end_mark = False
-        self.has_cmd_end_mark = False
         self.last_line = ''
-        self.mark_pattern = re.compile(r'%s(\d+)(.+)\.%s' % (self.CMD_END_MARK, '\r\n'))
-        self.wait_init_prompt_flag = True
-        self.init_prompt_q = Queue()
-        self.current_dir = ''
-        self.collect_wait_echo_prev_cmd = False
-        self.echo_prev_cmd_q = Queue()
-        self.wait_cmd_prompt = False
-        self.has_cmd_prompt = False
-
-    def wait_init_prompt(self):
-        self.init_prompt_q.get()
-
-    def mark_new_cmdline(self, cmdline, from_complete):
-        with self.lock:
-            self.need_omit_cmdline_echo = True
-            self.want_cmd_end_mark = True
-            self.has_cmd_end_mark = False
-            self.last_line = ''
-        if cmdline.endswith('\t'):
-            return cmdline
-        cmdline = cmdline.rstrip()
-        if cmdline or from_complete:
-            cmdline += ' ; '
-        if not cmdline:
-            return 'echo %s0$PWD.\n' % self.CMD_END_MARK
-        return cmdline + ('echo %s$?$PWD.\n' % self.CMD_END_MARK)
-
-    def mark_echo_prev_cmd_cmdline(self):
-        with self.lock:
-            self.collect_wait_echo_prev_cmd = True
-        return 'echo !!\n'
-
-    def wait_prev_cmdline(self):
-        data = ''
-        while True:
-            data += self.echo_prev_cmd_q.get()
-            if is_prompt_string(data):
-                with self.lock:
-                    self.collect_wait_echo_prev_cmd = False
-                break
-        lines = data.split('\n')
-        start_pos = 5
-        end_pos = lines[1].find(';') - 1
-        prev_cmd = lines[1][start_pos:end_pos]
-        self.logger.log('lines = (%s), prev_cmd = (%s)' % (lines, prev_cmd))
-        return prev_cmd
-
-    def mark_wait_cmd_prompt(self):
-        with self.lock:
-            self.wait_cmd_prompt = True
-            self.has_cmd_prompt = False
-
-    def has_cmd_prompt_flag(self):
-        with self.lock:
-            if self.has_cmd_prompt:
-                self.has_cmd_prompt = False
-                self.wait_cmd_prompt = False
-                return True
-            return False
+        self.prompt_pattern = re.compile(r'[\$\#][ ]+%s?$' % '\r')
+        self.has_prompt = False
 
     def receive_output(self, data):
         with self.lock:
-            if self.wait_init_prompt_flag:
-                total_data = self.last_line + data
-                if is_prompt_string(total_data):
-                    self.wait_init_prompt_flag = False
-                    self.init_prompt_q.put('a')
-                else:
-                    self.last_line = total_data[total_data.rfind('\n')+1:]
-                return
-            if self.collect_wait_echo_prev_cmd:
-                self.echo_prev_cmd_q.put(data)
-                return
-            if self.need_omit_cmdline_echo:
-                pos = data.find('\n')
-                if pos == -1:
-                    return
-                data = data[pos + 1:]
-                self.need_omit_cmdline_echo = False
-            self.logger.log('want_cmd_end_mark = %d, has_end_mark = %d' % (self.want_cmd_end_mark, self.has_cmd_end_mark))
-            if self.want_cmd_end_mark and not self.has_cmd_end_mark:
-                if data == '^C': # ^C, the cmd has been stopped.
-                    self.has_cmd_end_mark = True
-                else:
-                    total_data = self.last_line + data
-                    m = self.mark_pattern.search(total_data)
-                    self.logger.log('m = %s' % m)
-                    if m:
-                        self.has_cmd_end_mark = True
-                        self.logger.log('last_line = (%s), m.start() = %d' % (self.last_line, m.start()))
-                        if m.start() < len(self.last_line):
-                            self.terminal.erase_last_characters(len(self.last_line) - m.start())
-                        data = total_data[len(self.last_line):m.start()]
-                        if int(m.group(1)) != 0:
-                            data += self.CMD_END_MARK + m.group(1) + '.\r\n'
-                        data += total_data[m.end():]
-                        self.current_dir = m.group(2)
-                    else:
-                        self.last_line = total_data[total_data.rfind('\n')+1:]
-                        if len(self.last_line) > 300:
-                            self.last_line = self.last_line[-300:]
-            if self.wait_cmd_prompt and not self.has_cmd_prompt:
-                total_data = self.last_line + data
-                if is_prompt_string(total_data):
-                    self.has_cmd_prompt = True
+            total_data = self.last_line + data
+            if self.prompt_pattern.search(total_data):
+                self.has_prompt = True
+                self.last_line = ''
+            else:
                 self.last_line = total_data[total_data.rfind('\n')+1:]
-                if len(self.last_line) > 300:
-                    self.last_line = self.last_line[-300:]
         self.terminal.receive_output(data)
 
-    def is_cmd_finished(self):
+    def check_cmd_prompt(self):
         with self.lock:
-            if self.want_cmd_end_mark and self.has_cmd_end_mark:
-                self.want_cmd_end_mark = False
-                self.has_cmd_end_mark = False
+            if self.has_prompt:
+                self.has_prompt = False
                 return True
-        return False
-
-    def get_current_dir(self):
-        with self.lock:
-            return self.current_dir
+            return False
 
 
 class SSHClient(object):
@@ -503,6 +348,8 @@ class SSHClient(object):
                     self.cmd_end_marker.receive_output(msg_data)
                 elif msg_type == 'F':
                     self.file_transfer_cmd_handler.add_input(msg_data)
+                elif msg_type == 'S':
+                    pass
                 else:
                     self.logger.log('unsupported msg_type %s' % msg_type)
                     break
@@ -516,14 +363,14 @@ class SSHClient(object):
         self.logger.log('run')
         try:
             self.handle_window_size_change()
-            self.cmd_end_marker.wait_init_prompt()
+            while not self.cmd_end_marker.check_cmd_prompt():
+                time.sleep(0.1)
             init_data = self.set_terminal_env()
             while True:
                 cmdline = self.input_obj.read_cmdline(init_data)
+                self.logger.log('read_cmdline(%s,%s)' % (cmdline, to_hex_str(cmdline)))
                 if cmdline.endswith('\t'):
                     init_data = self.run_complete_cmdline(cmdline)
-                elif cmdline.endswith('\x12'): # ctrl-r
-                    init_data = self.run_searched_cmdline(cmdline)
                 else:
                     init_data = self.run_cmdline(cmdline)
 
@@ -535,42 +382,12 @@ class SSHClient(object):
         os._exit(0)
 
     def run_complete_cmdline(self, cmdline):
-        self.terminal_obj.erase_last_characters(len(cmdline) - 1)
         self.msg_helper.write_terminal_msg(cmdline)
-        while True:
-            data = self.input_obj.read_data()
-            if data.endswith('\n') or data.endswith('\r'):
-                sys.stdout.write('\n')
-                return_data = self.run_terminal_cmdline(data, from_complete=True)
-                break
-            elif data.endswith('\x03'): # ctrl-c
-                self.msg_helper.write_terminal_msg(data)
-                return ''
-            else:
-                self.msg_helper.write_terminal_msg(data)
-        cmdline = self.cmd_end_marker.mark_echo_prev_cmd_cmdline()
-        self.msg_helper.write_terminal_msg(cmdline)
-        prev_cmdline = self.cmd_end_marker.wait_prev_cmdline()
-        self.input_obj.cmd_history.add_cmd(prev_cmdline)
-        return return_data
-
-    def run_until_cmd_prompt(self, cmdline):
-        self.cmd_end_marker.mark_wait_cmd_prompt()
-        self.msg_helper.write_terminal_msg(cmdline)
-        while True:
-            data = self.input_obj.read_data()
-            if self.cmd_end_marker.has_cmd_prompt_flag():
-                return data
-            self.msg_helper.write_terminal_msg(data)
-    
-    def run_searched_cmdline(self, cmdline):
-        self.cmd_end_marker.mark_new_cmdline(cmdline, False)
-        self.msg_helper.write_terminal_msg(cmdline)        
-        return self.wait_cmd_finish()
+        self.wait_cmd_finish()
 
     def set_terminal_env(self):
         if 'TERM' in os.environ:
-            return self.run_cmdline('export TERM=%s' % os.environ['TERM'])
+            return self.run_cmdline('export TERM=%s\n' % os.environ['TERM'])
         return ''
 
     def handle_window_size_change(self):
@@ -584,23 +401,27 @@ class SSHClient(object):
         update_window_size()
 
     def run_cmdline(self, cmdline):
-        if self.file_transfer_cmd_handler.is_cmd_supported(cmdline):
-            self.file_transfer_cmd_handler.run_cmd(cmdline)
-            return self.run_terminal_cmdline('')
-        else:
+        if cmdline and cmdline[-1] in ['\x03', '\x12', '\x1b']:  # ctrl-c, ctrl-r, esc
             return self.run_terminal_cmdline(cmdline)
+        if self.file_transfer_cmd_handler.is_cmd_supported(cmdline):
+            return self.run_file_transfer_cmd(cmdline)
+        return self.run_terminal_cmdline(cmdline)
 
-    def run_terminal_cmdline(self, cmdline, from_complete=False):
-        self.logger.log('run_terminal_cmdline(%s)' % cmdline)
-        cmdline = self.cmd_end_marker.mark_new_cmdline(cmdline, from_complete)
+    def run_file_transfer_cmd(self, cmdline):
+        sys.stdout.write(cmdline.rstrip() + '\r\n')
+        sys.stdout.flush()
+        self.msg_helper.write_sync_dir_msg('')
+        self.file_transfer_cmd_handler.run_cmd(cmdline)
+        return self.run_terminal_cmdline('\n')
+
+    def run_terminal_cmdline(self, cmdline):
         self.msg_helper.write_terminal_msg(cmdline)
         return  self.wait_cmd_finish()
 
     def wait_cmd_finish(self):
         while True:
             data = self.input_obj.read_data()
-            if self.cmd_end_marker.is_cmd_finished():
-                self.file_transfer_cmd_handler.set_current_dir(self.cmd_end_marker.get_current_dir())
+            if self.cmd_end_marker.check_cmd_prompt():
                 return data
             self.msg_helper.write_terminal_msg(data)
 
