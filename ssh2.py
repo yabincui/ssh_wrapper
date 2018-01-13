@@ -177,6 +177,7 @@ class TerminalController(object):
         self.logger.log('receive_output_hex[%s]' % to_hex_str(data))
 
     def erase_last_characters(self, count=1):
+        self.logger.log('erase %d characters' % count)
         sys.stdout.write('\033[%dD\033[0K' % count)
         sys.stdout.flush()
 
@@ -311,6 +312,7 @@ class InputController(object):
         with self.eof_lock:
             if self.eof_flag:
                 raise NoInputException()
+        self.logger.log('read_data(%s)' % to_hex_str(data))
         return data
 
     def restore_stdin(self):
@@ -362,7 +364,7 @@ class CmdEndMarker(object):
         data = ''
         while True:
             data += self.echo_prev_cmd_q.get()
-            if data.endswith('# ') or data.endswith('$ '):
+            if is_prompt_string(data):
                 with self.lock:
                     self.collect_wait_echo_prev_cmd = False
                 break
@@ -377,7 +379,7 @@ class CmdEndMarker(object):
         with self.lock:
             if self.wait_init_prompt_flag:
                 total_data = self.last_line + data
-                if data.endswith('$ ') or data.endswith('# '):
+                if is_prompt_string(total_data):
                     self.wait_init_prompt_flag = False
                     self.init_prompt_q.put('a')
                 else:
@@ -399,6 +401,7 @@ class CmdEndMarker(object):
                 self.logger.log('m = %s' % m)
                 if m:
                     self.has_cmd_end_mark = True
+                    self.logger.log('last_line = (%s), m.start() = %d' % (self.last_line, m.start()))
                     if m.start() < len(self.last_line):
                         self.terminal.erase_last_characters(len(self.last_line) - m.start())
                     data = total_data[len(self.last_line):m.start()]

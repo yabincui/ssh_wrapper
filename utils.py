@@ -1,5 +1,6 @@
 import fcntl
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -121,3 +122,7 @@ def get_terminal_size(fd):
 
 def set_terminal_size(fd, width, height):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))
+
+def is_prompt_string(s):
+    return re.search(r'[\$\#][ ]+%s?$' % '\r', s)
+    #return s.endswith('$ ') or s.endswith('$ \r') or s.endswith('# ') or s.endswith('# \r')
