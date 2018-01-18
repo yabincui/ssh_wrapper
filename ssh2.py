@@ -308,7 +308,7 @@ class SSHClient(object):
     """ Send terminal and file transfer msgs to remote server. """
 
     def __init__(self, host_name, update_server):
-        self.logger = Logger('../ssh2.log')
+        self.logger = Logger('~/ssh2.log')
         self.terminal_obj = TerminalController(self.logger)
         self.input_obj = InputController(self.terminal_obj, self.logger)
         self.cmd_end_marker = CmdEndMarker(self.terminal_obj, self.logger)
