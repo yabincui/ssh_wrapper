@@ -65,6 +65,10 @@ Add file transfer cmds.
 
 Using cmd finish mark is too complex and not reliable. Switch to simple find cmd prompt and not intercept normal cmd flow.
 
+option to enable and disable log.
+better support for file transfer cmd history.
+support * in file transfer cmd.
+
 
 SshSyncer: monitor file systems change and sync between local and server
   The sync is in one direction, either from server to local, or from local to server.

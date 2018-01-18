@@ -27,12 +27,15 @@ def log_exit(msg):
     sys.exit(1)
 
 class Logger(object):
-    def __init__(self, log_file):
+    def __init__(self, log_file, enable_log=True):
+        self.enable_log = enable_log
         self.lock = threading.Lock()
         self.log_file = expand_path(log_file)
         self.fh = open(self.log_file, 'w')
     
     def log(self, msg):
+        if not self.enable_log:
+            return
         if not msg or msg[-1] != '\n':
             msg += '\n'
         with self.lock:

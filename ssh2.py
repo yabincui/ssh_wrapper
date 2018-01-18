@@ -93,10 +93,10 @@ class MsgHelper(object):
 class SSHServer(object):
     """ Start a server, run terminal and file transfer cmds.
     """
-    def __init__(self):
+    def __init__(self, enable_log):
         sys.stdout.write('\nssh server started\n')
         sys.stdout.flush()
-        self.logger = Logger('~/ssh2.log')
+        self.logger = Logger('~/ssh2.log', enable_log)
         self.msg_helper = MsgHelper(sys.stdin, sys.stdout, self.logger)
         self.child_pid, self.pty_fd = self.create_child_shell()
         self.shell_pid = None
@@ -184,8 +184,8 @@ class SSHServer(object):
         return None
 
 
-def run_ssh_server():
-    ssh_server = SSHServer()
+def run_ssh_server(args):
+    ssh_server = SSHServer(args.log)
     ssh_server.run()
 
 
@@ -307,8 +307,8 @@ class CmdEndMarker(object):
 class SSHClient(object):
     """ Send terminal and file transfer msgs to remote server. """
 
-    def __init__(self, host_name, update_server):
-        self.logger = Logger('~/ssh2.log')
+    def __init__(self, host_name, update_server, enable_log):
+        self.logger = Logger('~/ssh2.log', enable_log)
         self.terminal_obj = TerminalController(self.logger)
         self.input_obj = InputController(self.terminal_obj, self.logger)
         self.cmd_end_marker = CmdEndMarker(self.terminal_obj, self.logger)
@@ -320,7 +320,7 @@ class SSHClient(object):
                    'git clone https://github.com/yabincui/ssh_wrapper .ssh_wrapper && ')
         else:
             cmd = ''
-        self.popen_obj.stdin.write('%spython -u .ssh_wrapper/ssh2.py --server\n' % cmd)
+        self.popen_obj.stdin.write('%spython -u .ssh_wrapper/ssh2.py --server %s\n' % (cmd, '--log' if enable_log else ''))
         self.popen_obj.stdin.flush()
         while True:
             line = self.popen_obj.stdout.readline()
@@ -433,7 +433,7 @@ def run_ssh_client(args):
         config['host_name'] = args.host_name
     if 'host_name' not in config:
         log_exit('please set host_name in argument or ~/.sshwrapper.config.')
-    ssh_client = SSHClient(config['host_name'], args.update_server)
+    ssh_client = SSHClient(config['host_name'], args.update_server, args.log)
     ssh_client.run()
 
 def main():
@@ -444,9 +444,10 @@ def main():
     """)
     parser.add_argument('--server', action='store_true', help="Run SSHServer in the server.")
     parser.add_argument('--update-server', action='store_true', help="Update SSHWrapper in the server.")
+    parser.add_argument('--log', action='store_true', help="enable log")
     args = parser.parse_args()
     if args.server:
-        run_ssh_server()
+        run_ssh_server(args)
     else:
         run_ssh_client(args)
 
